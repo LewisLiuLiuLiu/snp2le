@@ -20,6 +20,14 @@ class ConverterState:
     # Wideband inductor models: the fixed topology (1 coil segment, 1 skin section, no
     # substrate coupling) instead of the one the fit picks, so every fit has the same elements.
     basic_model: bool = False
+    # Their fit options (inductor_fit.check_options), 0 and "auto" leave the choice to the fit.
+    # The GUI sets coil_segments (1 to 3), center_tap and the two weights at their defaults,
+    # the substrate variant and other weight values come from the CLI only.
+    coil_segments: int = 0                # 1 to 10 coil segments, 0: the fit picks 1 to 3
+    substrate: str = "auto"               # auto | symmetric | asymmetric | ...+coupling
+    peak_q_weight: float = 0.0            # emphasis A on L and Q near the Q peak, 0 = off
+    shunt_accuracy: float = 0.0           # substrate error floor K x |series branch|, 0 = off
+    center_tap: int = 0                   # center tap port of a 3-port, 0: detected
     max_order: int = 6
     enforce_passivity: bool = True
     # Largest singular value the enforced model may keep.  1.0 is strict passivity, a

@@ -22,6 +22,7 @@ from . import netlist as _nl
 from . import universal as _uni
 from . import mna as _mna
 from .structures import STRUCTURES, get_structure
+from .structures.inductor_wideband import wideband_options
 
 # (key, relative cost, message).  Universal mode is dominated by the fit itself,
 # structure mode by the MNA rebuild of the extracted RLC over every frequency.
@@ -167,8 +168,8 @@ def _convert_structure(state, net, res, track):
     struct = get_structure(state.structure_key)
     if struct.wideband:                       # fitted over the band, f_ext does not apply
         ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
-                                           state.iso_resistor, basic=state.basic_model,
-                                           progress=track.sub("extract"))
+                                           state.iso_resistor, progress=track.sub("extract"),
+                                           **wideband_options(state))
         res.messages.extend(metrics.pop("messages", ()))
     else:
         ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
@@ -206,8 +207,12 @@ def _convert_structure(state, net, res, track):
     # optional extra frequency-domain traces (e.g. inductor L/Q) and plot defaults
     track.enter("traces")
     try:
-        res.aux_traces = struct.freq_traces(net, res.model_s) or {}
-        res.default_plots = struct.default_plots()
+        if struct.wideband:                   # its views follow the fitted port order
+            res.aux_traces = struct.freq_traces(net, res.model_s, ir=ir) or {}
+            res.default_plots = struct.default_plots(ir=ir)
+        else:
+            res.aux_traces = struct.freq_traces(net, res.model_s) or {}
+            res.default_plots = struct.default_plots()
     except Exception as exc:                          # noqa: BLE001
         res.messages.append(f"freq traces failed: {exc}")
     res.passive = True                                # passive RLC by construction

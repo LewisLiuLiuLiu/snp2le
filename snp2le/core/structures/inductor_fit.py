@@ -18,12 +18,15 @@ SRF_FIT_FACTOR x the self-resonance frequency.
 
 Center-tapped 3-port model (ports p1, p2, ct): two half coils p1 -> m -> p2, each with Rs, Ls
 and the skin sections, Ls_h1 and Ls_h2 coupled with k, Cs across the whole coil, Rct from m
-to ct, and a Cox-(Rsi||Csi) network at p1, m and p2.
+to ct, and a Cox-(Rsi||Csi) network at p1, m and p2.  The center tap may be any port of the
+file, the coil ends are the other two in file order.
 
 Electrically long coils are split into 1 to 3 equal segments with the substrate network
 distributed over the coil nodes.  Element values are always totals over the segments.  With
 `basic=True` the topology is fixed (1 segment, 1 skin section, no substrate coupling), so
-every fit has the same elements, e.g. for machine-learning data tables.
+every fit has the same elements, e.g. for machine-learning data tables.  inductor_fit's
+other options are keywords of both fits: a fixed segment count, a fixed substrate network,
+and the peak-Q and shunt-accuracy weighting of the error function (see check_options).
 
 Pure numpy/scipy, no Qt and no file output: the Structure classes in inductor_wideband.py
 turn an InductorFit into a CircuitIR.
@@ -59,6 +62,19 @@ MIN_FIT_POINTS = 10
 # solution can fit as well without being physical, so coupling must pass a plausibility check.
 SUBSTRATE_VARIANTS = {"symmetric": (True, False), "asymmetric": (False, False),
                       "symmetric+coupling": (True, True), "asymmetric+coupling": (False, True)}
+SUBSTRATE_CHOICES = ("auto",) + tuple(SUBSTRATE_VARIANTS)
+CT_SUBSTRATE_CHOICES = ("auto", "symmetric", "asymmetric")   # the 3-port model has no coupling
+SEGMENT_RANGE = (1, 10)        # a fixed segment count, the automatic choice stays 1 to 3
+
+# Optional weighting of the error function, off unless asked for:
+# peak-Q weight A: the L and Q goals get the factor 1 + A*bump, where the bump rises smoothly
+#   from 0 at PEAK_Q_LEVEL x the peak Q of the data to 1 at the peak (over all Q responses).
+# shunt accuracy K: the normalization of the shunt branch goals is floored at K x |series
+#   branch|.  At low frequency the shunt branch is 1e-4 to 1e-3 of the series branch, so a
+#   small absolute error of the data (measurement noise, FDTD) swamps it.
+PEAK_Q_LEVEL = 0.8
+DEFAULT_PEAK_Q_WEIGHT = 2.0
+DEFAULT_SHUNT_ACCURACY = 0.01
 
 PARAM_NAMES = ["Rs", "Ls", "Rskin1", "Lskin1", "Rskin2", "Lskin2", "Cs",
                "Cox1", "Rsi1", "Csi1", "Cox2", "Rsi2", "Csi2",
@@ -88,6 +104,32 @@ class InductorFit:
     cost: float = float("nan")   # weighted error function of the selected model
     metrics: dict = field(default_factory=dict)
     messages: list = field(default_factory=list)
+    port_order: tuple = (0, 1)   # file port index of p1, p2 (and the center tap), 0-based
+
+
+def check_options(n_ports, basic=False, segments=None, substrate="auto", peak_q_weight=None,
+                  shunt_accuracy=None, center_tap=None):
+    """Refuse an option set the fit cannot honour, with the reason.  None and "auto" leave
+    the choice to the fit.  The CLI, the GUI and the engine all reach the fit through here."""
+    lo, hi = SEGMENT_RANGE
+    if segments is not None and not (isinstance(segments, int) and lo <= segments <= hi):
+        raise ValueError(f"the coil segment count must be {lo} to {hi}, got {segments!r}")
+    if basic and segments not in (None, 1):
+        raise ValueError(f"the basic model always has 1 coil segment, got {segments}")
+    choices = SUBSTRATE_CHOICES if n_ports == 2 else CT_SUBSTRATE_CHOICES
+    if substrate not in choices:
+        why = (", the center-tapped model has no substrate coupling"
+               if substrate in SUBSTRATE_CHOICES else "")
+        raise ValueError(f"the substrate network must be one of {', '.join(choices)}, got "
+                         f"{substrate!r}{why}")
+    if basic and SUBSTRATE_VARIANTS.get(substrate, (False, False))[1]:
+        raise ValueError("the basic model has no substrate coupling")
+    for name, value in (("peak-Q weight", peak_q_weight), ("shunt accuracy", shunt_accuracy)):
+        if value is not None and not (isinstance(value, (int, float)) and math.isfinite(value)
+                                      and value > 0):
+            raise ValueError(f"the {name} must be a positive number, got {value!r}")
+    if center_tap is not None and center_tap not in (1, 2, 3):
+        raise ValueError(f"the center tap port must be 1, 2 or 3, got {center_tap!r}")
 
 
 # ---------------- model elements ----------------
@@ -311,15 +353,48 @@ def _real_residual(model, meas, norm, weight):
     return weight * (model - meas) / norm / math.sqrt(len(meas))
 
 
-def _make_goals(meas_fit, goal_list):
+def _make_goals(meas_fit, goal_list, norm_floor=None):
     """Fit goals (quantity, weight, mask into the fit band, normalization).  A goal with
-    fewer than 3 points is skipped (SRF close to the low end of the band)."""
+    fewer than 3 points is skipped (SRF close to the low end of the band).  A weight is a
+    scalar or an array over the fit band, `norm_floor` an optional lower limit of the
+    normalization per quantity, also over the fit band."""
     goals = []
     for key, w, mask in goal_list:
         if np.count_nonzero(mask) < 3:
             continue
-        goals.append((key, w, mask, _floored_norm(meas_fit[key][mask])))
+        norm = _floored_norm(meas_fit[key][mask])
+        if norm_floor and key in norm_floor:
+            norm = np.maximum(norm, norm_floor[key][mask])
+        goals.append((key, w if np.isscalar(w) else w[mask], mask, norm))
     return goals
+
+
+def _peak_q_weight(meas_fit, q_goals, n_fit, weight):
+    """Per-point factor over the fit band for the L and Q goals, or None when `weight` is
+    None.  q_goals are (Q quantity, mask of its range below SRF)."""
+    if weight is None:
+        return None
+    bump = np.zeros(n_fit)
+    for key, mask in q_goals:
+        if np.count_nonzero(mask) < 3:
+            continue
+        q = meas_fit[key]
+        x = np.clip((q / np.max(q[mask]) - PEAK_Q_LEVEL) / (1 - PEAK_Q_LEVEL), 0, 1)
+        bump = np.maximum(bump, np.where(mask, x * x * (3 - 2 * x), 0))   # smoothstep
+    return 1 + weight * bump
+
+
+def _weighting_messages(f_fit, wq, peak_q_weight, shunt_accuracy):
+    msgs = []
+    if wq is not None and np.any(wq > 1):
+        band = f_fit[wq > 1]
+        msgs.append(f"peak-Q weight {peak_q_weight:g}: L and Q weighted up to {wq.max():.3g}x "
+                    f"from {_ghz(band[0])} to {_ghz(band[-1])}, where the data's Q is at "
+                    f"least {PEAK_Q_LEVEL} x its peak")
+    if shunt_accuracy is not None:
+        msgs.append(f"shunt accuracy {shunt_accuracy:g}: substrate errors are measured "
+                    f"against at least {shunt_accuracy:g} x the series branch")
+    return msgs
 
 
 def _goal_residuals(model, meas_fit, goals):
@@ -637,11 +712,18 @@ def _srf_message(srf_data, srf_model, f_last):
 
 # ======================== 2-port inductor ========================
 
-def fit_two_port(net, basic=False, progress=None) -> InductorFit:
-    """Fit the 2-port wideband inductor model to `net` (a 2-port skrf.Network)."""
+def fit_two_port(net, basic=False, segments=None, substrate="auto", peak_q_weight=None,
+                 shunt_accuracy=None, progress=None) -> InductorFit:
+    """Fit the 2-port wideband inductor model to `net` (a 2-port skrf.Network).
+
+    `segments` fixes the coil segment count, `substrate` the substrate network variant (one
+    of SUBSTRATE_CHOICES), `peak_q_weight` (A) and `shunt_accuracy` (K) switch on the
+    optional weighting.  None and "auto" leave the choice to the fit."""
     if net.nports != 2:
         raise ValueError("the wideband inductor model needs a 2-port (.s2p)")
+    check_options(2, basic, segments, substrate, peak_q_weight, shunt_accuracy)
     num_skin = 1 if basic else 2
+    fixed_segments, fixed_substrate = segments is not None, substrate != "auto"
     f, omega, Ymeas = _prepare(net)
 
     Ysh1_meas, Ysh2_meas, Yser_meas = pi_branches(Ymeas)
@@ -667,8 +749,11 @@ def fit_two_port(net, basic=False, progress=None) -> InductorFit:
     shunt_asymmetry = _rel_difference(Ysh1_meas[fit_mask], Ysh2_meas[fit_mask])
     data_symmetric = shunt_asymmetry < SYMMETRY_TOLERANCE
     sym = "symmetric" if data_symmetric else "asymmetric"
-    substrate_choices = [sym] if basic else [sym, sym + "+coupling"]
-    segment_choices = (1,) if basic else SEGMENT_CHOICES
+    if fixed_substrate:
+        substrate_choices = [substrate]
+    else:
+        substrate_choices = [sym] if basic else [sym, sym + "+coupling"]
+    segment_choices = (segments,) if fixed_segments else (1,) if basic else SEGMENT_CHOICES
     total_runs = (sum(_runs(0 if i == 0 else 1) for i in range(len(segment_choices)))
                   + (len(substrate_choices) - 1) * _runs(1))
     tick = _Ticker(progress, total_runs)
@@ -700,12 +785,19 @@ def fit_two_port(net, basic=False, progress=None) -> InductorFit:
                     L11=L11_meas[fit_mask], L22=L22_meas[fit_mask], Ldiff=Ldiff_meas[fit_mask],
                     Q11=Q11_meas[fit_mask], Q22=Q22_meas[fit_mask], Qdiff=Qdiff_meas[fit_mask])
     all_fit = np.ones(len(f_fit), dtype=bool)
+    wq = _peak_q_weight(meas_fit, (("Q11", lq_fit), ("Q22", lq_fit), ("Qdiff", lqdiff_fit)),
+                        len(f_fit), peak_q_weight)
+    wL, wQ = (W_L, W_Q) if wq is None else (W_L * wq, W_Q * wq)
+    norm_floor = {}
+    if shunt_accuracy is not None:
+        floor = shunt_accuracy * np.abs(meas_fit["Yser"])
+        norm_floor = dict(Ysh1=floor, Ysh2=floor, ReYsh1=floor, ReYsh2=floor)
     goals = _make_goals(meas_fit, [
         ("Y11", W_Y, all_fit), ("Y22", W_Y, all_fit), ("Yser", W_Y, all_fit),
         ("Ysh1", W_SHUNT, all_fit), ("Ysh2", W_SHUNT, all_fit),
         ("ReYsh1", W_SHUNT_RE, all_fit), ("ReYsh2", W_SHUNT_RE, all_fit),
-        ("L11", W_L, lq_fit), ("L22", W_L, lq_fit), ("Ldiff", W_L, lqdiff_fit),
-        ("Q11", W_Q, lq_fit), ("Q22", W_Q, lq_fit), ("Qdiff", W_Q, lqdiff_fit)])
+        ("L11", wL, lq_fit), ("L22", wL, lq_fit), ("Ldiff", wL, lqdiff_fit),
+        ("Q11", wQ, lq_fit), ("Q22", wQ, lq_fit), ("Qdiff", wQ, lqdiff_fit)], norm_floor)
 
     def residual_fn_for(segments):
         return lambda x: np.concatenate([
@@ -791,8 +883,10 @@ def fit_two_port(net, basic=False, progress=None) -> InductorFit:
     L_dc = fit["Ls"] + fit["Lskin1"] + (fit["Lskin2"] if num_skin == 2 else 0.0)
 
     msgs = [f"wideband fit {_ghz(f_fit[0])} to {_ghz(f_fit[-1])}, {segments} coil "
-            f"segment{'' if segments == 1 else 's'}, {substrate} substrate network"
+            f"segment{'' if segments == 1 else 's'}" + (" (set)" if fixed_segments else "")
+            + f", {substrate} substrate network" + (" (set)" if fixed_substrate else "")
             + (", basic model" if basic else "")]
+    msgs += _weighting_messages(f_fit, wq, peak_q_weight, shunt_accuracy)
     if fmax < f[-1]:
         msgs.append(f"data above {_ghz(fmax)} not fitted (beyond {SRF_FIT_FACTOR} x SRF)")
     msgs.append(_srf_message(SRF_meas, SRF_model, f[-1]))
@@ -831,26 +925,36 @@ def _center_tap_hint(Y):
     return min(pairs, key=pairs.get)
 
 
-def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
-    """Fit the center-tapped inductor model to `net`: a 3-port with the coil ends on ports
-    1 and 2 and the center tap on port 3."""
+def fit_center_tap(net, basic=False, segments=None, substrate="auto", peak_q_weight=None,
+                   shunt_accuracy=None, center_tap=None, progress=None) -> InductorFit:
+    """Fit the center-tapped inductor model to `net`, a 3-port with two coil ends and the
+    center tap.  `center_tap` names the center tap port (1 to 3), None takes the port the
+    data puts in the middle of the coil.  `substrate` is one of CT_SUBSTRATE_CHOICES and
+    forces all three symmetry groups, the other options are those of fit_two_port."""
     if net.nports != 3:
         raise ValueError("the center-tapped inductor model needs a 3-port (.s3p)")
+    check_options(3, basic, segments, substrate, peak_q_weight, shunt_accuracy, center_tap)
     num_skin = 1 if basic else 2
-    f, omega, Ymeas = _prepare(net)
-    s = np.asarray(net.s[net.f > 0])
+    f, omega, Y_file = _prepare(net)
+    s_file = np.asarray(net.s[net.f > 0])
 
     # Every port must touch the coil: at low frequency each one sees the coil (a small
     # resistance) with the others grounded.  An open or only capacitively coupled port (a
     # center tap port missing the metal in the EM setup) has a tiny, capacitive admittance.
-    y_lf = np.abs(np.diagonal(Ymeas[0]))
-    for i in np.where((y_lf < 1e-3 * y_lf.max()) | (np.diagonal(Ymeas[0]).imag > 0))[0]:
-        c_ff = Ymeas[0, i, i].imag / omega[0] * 1e15
+    # Checked in the file's port order, before the center tap is looked for.
+    y_lf = np.abs(np.diagonal(Y_file[0]))
+    for i in np.where((y_lf < 1e-3 * y_lf.max()) | (np.diagonal(Y_file[0]).imag > 0))[0]:
+        c_ff = Y_file[0, i, i].imag / omega[0] * 1e15
         raise ValueError(
             f"port {i + 1} is not connected to the coil: at {_ghz(f[0])} its input admittance "
-            f"with the other ports grounded is {abs(Ymeas[0, i, i]):.3g} S, capacitive "
-            f"({c_ff:.3g} fF), |S{i + 1}{i + 1}| = {abs(s[0, i, i]):.4f}. Check the port "
+            f"with the other ports grounded is {abs(Y_file[0, i, i]):.3g} S, capacitive "
+            f"({c_ff:.3g} fF), |S{i + 1}{i + 1}| = {abs(s_file[0, i, i]):.4f}. Check the port "
             f"definition in the EM setup")
+    # internal order p1, p2, ct: the coil ends in file order, then the center tap
+    detected = _center_tap_hint(Y_file[0])
+    ct = detected if center_tap is None else center_tap - 1
+    order = [i for i in range(3) if i != ct] + [ct]
+    Ymeas = Y_file[:, order][:, :, order]
     meas = ct_quantities(Ymeas, omega)
 
     # ---- self-resonances of the data and the fit band ----
@@ -865,7 +969,8 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
     omega_fit = omega[fit_mask]
     lq_masks = {key: _below(f, fit_mask, srf) for key, srf in SRF_meas.items()}
 
-    segment_choices = (1,) if basic else SEGMENT_CHOICES
+    segment_choices = ((segments,) if segments is not None else (1,) if basic
+                       else SEGMENT_CHOICES)
     tick = _Ticker(progress, sum(_runs(0 if i == 0 else 1)
                                  for i in range(len(segment_choices))))
     tick.start("calculating the starting values")
@@ -905,9 +1010,18 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
     goal_list = ([(key, W_Y, all_fit) for key in ("Y11", "Y22", "Y33", "B12", "B13", "B23")]
                  + [(key, W_SHUNT, all_fit) for key in ("S1", "S2", "S3")]
                  + [(key, W_SHUNT_RE, all_fit) for key in ("ReS1", "ReS2", "ReS3")])
-    for key in ("dd_gnd", "dd_open", "cm", "11", "22"):
-        goal_list += [("L" + key, W_L, lq_fit[key]), ("Q" + key, W_Q, lq_fit[key])]
-    goals = _make_goals(meas_fit, goal_list)
+    lq_keys = ("dd_gnd", "dd_open", "cm", "11", "22")
+    wq = _peak_q_weight(meas_fit, [("Q" + key, lq_fit[key]) for key in lq_keys], len(f_fit),
+                        peak_q_weight)
+    wL, wQ = (W_L, W_Q) if wq is None else (W_L * wq, W_Q * wq)
+    norm_floor = {}
+    if shunt_accuracy is not None:
+        series = np.max(np.abs([meas_fit[key] for key in ("B12", "B13", "B23")]), axis=0)
+        norm_floor = {key: shunt_accuracy * series
+                      for key in ("S1", "S2", "S3", "ReS1", "ReS2", "ReS3")}
+    for key in lq_keys:
+        goal_list += [("L" + key, wL, lq_fit[key]), ("Q" + key, wQ, lq_fit[key])]
+    goals = _make_goals(meas_fit, goal_list, norm_floor)
 
     def residual_fn_for(segments):
         return lambda x: np.concatenate([
@@ -916,8 +1030,8 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
             _corner_penalty(CT_PARAM_NAMES, x, f_fit[0])])
 
     span = np.array([2, 2, 3, 3, 3, 3] * 2 + [0, 3, 3] + [COX_SPAN, 3, 3] * 3)
-    x_base_seed = _log_seed(CT_PARAM_NAMES, seed,
-                            "a center-tapped inductor with the center tap on port 3")
+    x_base_seed = _log_seed(CT_PARAM_NAMES, seed, f"a center-tapped inductor with the center "
+                                                  f"tap on port {ct + 1}")
 
     # Symmetry is decided from the data, separately for the half coil inductances, the half
     # coil resistances and the substrate at p1/p2: symmetric halves can still differ in
@@ -927,7 +1041,10 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
     asymmetry = {"inductance": _rel_difference(Zhalf1.imag, Zhalf2.imag),
                  "resistance": _rel_difference(Zhalf1.real, Zhalf2.real),
                  "substrate": _rel_difference(meas["S1"][fit_mask], meas["S2"][fit_mask])}
-    symmetric = {group: value < SYMMETRY_TOLERANCE for group, value in asymmetry.items()}
+    if substrate == "auto":
+        symmetric = {group: value < SYMMETRY_TOLERANCE for group, value in asymmetry.items()}
+    else:
+        symmetric = {group: substrate == "symmetric" for group in asymmetry}
     tie_groups = {"inductance": {n + "_h2": n + "_h1" for n in ("Ls", "Lskin1", "Lskin2")},
                   "resistance": {n + "_h2": n + "_h1" for n in ("Rs", "Rskin1", "Rskin2")},
                   "substrate": {"Cox2": "Cox1", "Rsi2": "Rsi1", "Csi2": "Csi1"}}
@@ -967,13 +1084,16 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
 
     sym_text = ", ".join(f"{group} {'symmetric' if symmetric[group] else 'asymmetric'}"
                          for group in asymmetry)
-    msgs = [f"center-tapped fit {_ghz(f_fit[0])} to {_ghz(f_fit[-1])}, {segments} coil "
-            f"segment{'' if segments == 1 else 's'} per half, {sym_text}"
+    msgs = [f"center-tapped fit {_ghz(f_fit[0])} to {_ghz(f_fit[-1])}, center tap on port "
+            f"{ct + 1} ({'detected' if center_tap is None else 'set'}), {segments} coil "
+            f"segment{'' if segments == 1 else 's'} per half"
+            + (" (set)" if len(segment_choices) == 1 and not basic else "")
+            + f", {sym_text}" + (" (set)" if substrate != "auto" else "")
             + (", basic model" if basic else "")]
-    hint = _center_tap_hint(Ymeas[i0])
-    if hint != 2:
-        msgs.append(f"port {hint + 1} looks like the center tap, the model expects it on "
-                    f"port 3")
+    if center_tap is not None and detected != ct:
+        msgs.append(f"port {detected + 1} looks like the center tap, the fit uses port "
+                    f"{ct + 1} as set")
+    msgs += _weighting_messages(f_fit, wq, peak_q_weight, shunt_accuracy)
     if fmax < f[-1]:
         msgs.append(f"data above {_ghz(fmax)} not fitted (beyond {SRF_FIT_FACTOR} x SRF)")
     srf_model_ref = [SRF_model[key] for key in ("dd_gnd", "11", "22")
@@ -1000,7 +1120,8 @@ def fit_center_tap(net, basic=False, progress=None) -> InductorFit:
                "L_diff_dc": L_dc[0] + L_dc[1] + 2 * M_fit,
                "Qdiff_peak": q_dd[0][0], "Qdiff_peak_data": q_dd[1][0],
                "Qcm_peak": q_cm[0][0], "Qcm_peak_data": q_cm[1][0],
-               "fit_cost": float(best_cost)}
+               "fit_cost": float(best_cost), "ct_port": ct + 1, "ct_detected": detected + 1}
     return InductorFit(values=fit, active=active, segments=segments, num_skin=num_skin,
                        basic=bool(basic), f_fit=(float(f_fit[0]), float(f_fit[-1])),
-                       cost=float(best_cost), metrics=metrics, messages=msgs)
+                       cost=float(best_cost), metrics=metrics, messages=msgs,
+                       port_order=tuple(order))

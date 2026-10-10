@@ -13,6 +13,11 @@ segment count.  The substrate network sits on every coil node, and the half coil
 center-tapped model are coupled cell by cell with k/segments, which is the same mutual
 inductance M/segments^2 per cell pair as in the fit.  Topology and netlist layout follow
 Volker Muehlhaus' inductor_fit (https://github.com/VolkerMuehlhaus/lumpedmodel).
+
+The subcircuit keeps the file's port order whichever port the center tap is on, so its
+pins match the EM ports.  The fit options of the ConverterState reach the fit through
+wideband_options(), the engine passes the IR to freq_traces() and default_plots() so the
+center-tapped views follow the fitted port order.
 """
 from __future__ import annotations
 import re
@@ -75,15 +80,44 @@ def _row(name, value):
     return label, float(value), unit
 
 
+def wideband_options(state):
+    """The fit keywords a ConverterState asks for, where 0 and "auto" leave the choice to the
+    fit.  The one place the state's fields become fit options, for the GUI and the CLI."""
+    def number(name, cast):
+        value = getattr(state, name, 0) or 0
+        try:
+            return cast(value) or None
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a number, got {value!r}") from None
+
+    return dict(basic=bool(getattr(state, "basic_model", False)),
+                segments=number("coil_segments", int),
+                substrate=str(getattr(state, "substrate", "auto") or "auto"),
+                peak_q_weight=number("peak_q_weight", float),
+                shunt_accuracy=number("shunt_accuracy", float),
+                center_tap=number("center_tap", int))
+
+
+def _ct_ports(ir):
+    """(coil end, coil end, center tap) of a center-tapped IR, as 0-based file ports."""
+    if ir is None:
+        return 0, 1, 2
+    nodes = {e.name: e.nodes for e in ir.elements}
+    a, b = nodes["Cs"]
+    return int(a[1:]) - 1, int(b[1:]) - 1, int(nodes["Rct"][1][1:]) - 1
+
+
 class _WidebandInductor(Structure):
     wideband = True
 
-    def extract(self, net, f_extract=None, n_segments=None, iso_r=True,
-                basic=False, progress=None):              # f_extract .. iso_r: unused
+    def extract(self, net, f_extract=None, n_segments=None, iso_r=True, progress=None,
+                **options):                    # f_extract .. iso_r: unused
+        """`options` are wideband_options(): basic, segments, substrate, peak_q_weight,
+        shunt_accuracy and center_tap (the center-tapped model only)."""
         if net.nports != self.n_ports:
             raise ValueError(f"{self.display_name} needs a {self.n_ports}-port "
                              f"(.s{self.n_ports}p)")
-        fit = self._fit(net, basic=basic, progress=progress)
+        fit = self._fit(net, progress=progress, **options)
         ir = self._build_ir(fit)
         rows = [_row(name, fit.values[name]) for name in self._row_names(fit)]
         metrics = dict(fit.metrics, messages=list(fit.messages))
@@ -96,8 +130,8 @@ class InductorWideband(_WidebandInductor):
     n_ports = 2
 
     @staticmethod
-    def _fit(net, basic=False, progress=None):
-        return _fit.fit_two_port(net, basic=basic, progress=progress)
+    def _fit(net, center_tap=None, **options):     # a 2-port has no center tap
+        return _fit.fit_two_port(net, **options)
 
     @staticmethod
     def _row_names(fit):
@@ -125,10 +159,10 @@ class InductorWideband(_WidebandInductor):
             ir.add(Element("C", "Csub12", ("s0", f"s{n}"), v["Csub12"]))
         return ir
 
-    def default_plots(self):
+    def default_plots(self, ir=None):
         return ["Ldiff / Q", "L11 / Q11", "Lseries / Cshunt", "S21"]
 
-    def freq_traces(self, net, model_s):
+    def freq_traces(self, net, model_s, ir=None):
         """The inductor-pi views (Ldiff / Q, Lseries / Cshunt, Rseries / Rshunt), plus the
         single-ended L and Q at port 1 with port 2 grounded, which the fit also targets."""
         traces = InductorPi().freq_traces(net, model_s)
@@ -154,8 +188,8 @@ class InductorCenterTap(_WidebandInductor):
     n_ports = 3
 
     @staticmethod
-    def _fit(net, basic=False, progress=None):
-        return _fit.fit_center_tap(net, basic=basic, progress=progress)
+    def _fit(net, **options):
+        return _fit.fit_center_tap(net, **options)
 
     @staticmethod
     def _row_names(fit):
@@ -164,13 +198,14 @@ class InductorCenterTap(_WidebandInductor):
     @staticmethod
     def _build_ir(fit):
         v, n = fit.values, fit.segments
-        # the EM port order is the pin order: coil ends on p1, p2, the center tap on p3
+        # the EM port order is the pin order, whichever port the center tap is on
+        end1, end2, tap = (f"p{i + 1}" for i in fit.port_order)
         ir = CircuitIR(name="inductor_ct", ports=["p1", "p2", "p3"], physical=True)
-        _header(ir, "wideband center-tapped inductor model (center tap p3)", fit,
+        _header(ir, f"wideband center-tapped inductor model (center tap {tap})", fit,
                 per_half=True)
 
         def coil_node(k):
-            return "p1" if k == 0 else "p2" if k == 2 * n else "m" if k == n else f"c{k}"
+            return end1 if k == 0 else end2 if k == 2 * n else "m" if k == n else f"c{k}"
 
         def cell(h, i):
             return f"_h{h}" + (f"_{i + 1}" if n > 1 else "")
@@ -185,25 +220,30 @@ class InductorCenterTap(_WidebandInductor):
         for i in range(n):
             for j in range(n):
                 ir.add_coupling(f"Ls{cell(1, i)}", f"Ls{cell(2, j)}", v["k"] / n)
-        ir.add(Element("C", "Cs", ("p1", "p2"), v["Cs"]))
-        ir.add(Element("R", "Rct", ("m", "p3"), v["Rct"]))
+        ir.add(Element("C", "Cs", (end1, end2), v["Cs"]))
+        ir.add(Element("R", "Rct", ("m", tap), v["Rct"]))
         p = np.array([v[name] for name in _fit.CT_PARAM_NAMES])
         for k, (cox, rsi, csi) in enumerate(zip(*_fit.ct_node_shunt_values(p, n))):
             sfx = {0: "1", n: "ct", 2 * n: "2"}[k] if n == 1 else f"_n{k}"
             _add_substrate(ir, sfx, coil_node(k), k, cox, rsi, csi)
         return ir
 
-    def default_plots(self):
-        return ["Ldiff / Qdiff", "Lcm / Qcm", "L11 / Q11", "S21"]
+    def default_plots(self, ir=None):
+        a, b, _tap = _ct_ports(ir)
+        return ["Ldiff / Qdiff", "Lcm / Qcm", f"L{a + 1}{a + 1} / Q{a + 1}{a + 1}",
+                f"S{b + 1}{a + 1}"]
 
-    def freq_traces(self, net, model_s):
+    def freq_traces(self, net, model_s, ir=None):
         """Differential L and Q with the center tap AC grounded and open, common mode at the
-        center tap (p1, p2 grounded), and single-ended at port 1 (p2, ct grounded)."""
+        center tap (both coil ends grounded), and single-ended at the first coil end (the
+        other ports grounded).  `ir` names the ports, the file's order otherwise."""
         f = net.f
         w = 2 * np.pi * f
         z0 = float(np.real(net.z0.flatten()[0]))
-        D = _ct_responses(net.s, w, z0)
-        M = _ct_responses(model_s, w, z0) if model_s is not None else None
+        order = list(_ct_ports(ir))
+        D = _ct_responses(net.s, w, z0, order)
+        M = _ct_responses(model_s, w, z0, order) if model_s is not None else None
+        a, others = order[0] + 1, sorted(i + 1 for i in order[1:])
 
         def pair(key, where, sym):
             return _lq_pair(f"Inductance, {where}", f"Quality factor, {where}",
@@ -215,13 +255,14 @@ class InductorCenterTap(_WidebandInductor):
                 "Ldiff / Qdiff (ct open)": pair("dd_open", "differential, center tap open",
                                                 "diff"),
                 "Lcm / Qcm": pair("cm", "common mode at the center tap", "cm"),
-                "L11 / Q11": pair("11", "port 1, ports 2 and 3 grounded", "11")}
+                f"L{a}{a} / Q{a}{a}": pair(
+                    "11", f"port {a}, ports {others[0]} and {others[1]} grounded", f"{a}{a}")}
 
     def schematic_drawing(self, ir):
         names = {e.name for e in ir.elements}
         segments = coil_segments(ir)
         two_skin = any(nm.startswith("Rskin2") for nm in names)
-        return _draw_center_tap(two_skin, segments)
+        return _draw_center_tap(two_skin, segments, [i + 1 for i in _ct_ports(ir)])
 
 
 # ---------------- plot traces ----------------
@@ -235,9 +276,10 @@ def _l_q(s, f, z0, port):
     return L, Q
 
 
-def _ct_responses(s, w, z0):
+def _ct_responses(s, w, z0, order):
+    """ct_quantities of S, its ports taken in `order` (coil end, coil end, center tap)."""
     import skrf
-    Y = skrf.network.s2y(np.asarray(s), z0=z0)
+    Y = skrf.network.s2y(np.asarray(s), z0=z0)[:, order][:, :, order]
     with np.errstate(divide="ignore", invalid="ignore"):
         return _fit.ct_quantities(Y, w)
 
@@ -383,12 +425,13 @@ def _draw_two_port(two_skin, coupling, segments):
     return d
 
 
-def _draw_center_tap(two_skin, segments):
+def _draw_center_tap(two_skin, segments, ports=(1, 2, 3)):
+    """`ports` are the file ports of the two coil ends and the center tap."""
     import schemdraw.elements as elm
     from schemdraw.util import Point
     d = _drawing()
     p1 = Point((0, 0))
-    d.add(elm.Dot(open=True).at(p1).label(port_label(1), "left"))
+    d.add(elm.Dot(open=True).at(p1).label(port_label(ports[0]), "left"))
     n1 = p1 + Point((1.2, 0))
     _line(d, p1, n1)
     d.add(elm.Dot().at(n1))
@@ -406,7 +449,7 @@ def _draw_center_tap(two_skin, segments):
     d.add(elm.Dot().at(n2))
     p2 = n2 + Point((1.2, 0))
     _line(d, n2, p2)
-    d.add(elm.Dot(open=True).at(p2).label(port_label(2), "right"))
+    d.add(elm.Dot(open=True).at(p2).label(port_label(ports[1]), "right"))
     # magnetic coupling of the two Ls
     hk = 1.4
     for ls in (ls1, ls2):
@@ -417,7 +460,7 @@ def _draw_center_tap(two_skin, segments):
     # center tap lead, down from the coil midpoint
     ct = Point((m.x, -_U - 0.6))
     d.add(elm.Resistor().endpoints(m, ct).label(comp_label("R_ct"), "top"))
-    d.add(elm.Dot(open=True).at(ct).label(port_label(3), "bottom"))
+    d.add(elm.Dot(open=True).at(ct).label(port_label(ports[2]), "bottom"))
     _shunt(d, n1, "1", "left")
     _shunt(d, m2, "ct", "right")
     _shunt(d, n2, "2", "right")

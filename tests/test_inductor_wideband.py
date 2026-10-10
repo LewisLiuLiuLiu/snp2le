@@ -191,10 +191,118 @@ def test_progress_is_reported_up_to_done():
 
 
 def test_data_that_is_no_inductor_is_refused_with_a_reason():
-    """A Wilkinson divider is no center-tapped inductor: its half coils come out negative."""
-    res = _convert("wpd_ihp-sg13g2.s3p", "inductor-ct", basic_model=True)
+    """A Wilkinson divider is no center-tapped inductor: read with the center tap on port 3,
+    its half coils come out negative.  (The detection takes its input port, which sits
+    between the two arms like a center tap, and fits a model the panel then names.)"""
+    res = _convert("wpd_ihp-sg13g2.s3p", "inductor-ct", basic_model=True, center_tap=3)
     assert not res.ok
-    assert "does not look like a center-tapped inductor" in res.error
+    assert "does not look like a center-tapped inductor with the center tap on port 3" in (
+        res.error)
+
+
+# ---------------------------------------------------------------- fit options
+
+def test_a_fixed_segment_count_and_substrate_are_used():
+    res = _convert(IND, "inductor-wideband", coil_segments=2)
+    assert res.ok and res.metrics["segments"] == 2 and coil_segments(res.ir) == 2
+    assert "2 coil segments (set)" in res.messages[0]
+    res = _convert(IND, "inductor-wideband", basic_model=True, substrate="asymmetric")
+    vals = _values(res)
+    assert res.metrics["substrate"] == "asymmetric" and vals["C_ox2"] != vals["C_ox1"]
+    assert "asymmetric substrate network (set)" in res.messages[0]
+
+
+@pytest.mark.parametrize("kw, why", [
+    (dict(basic=True, segments=2), "the basic model always has 1 coil segment"),
+    (dict(basic=True, substrate="asymmetric+coupling"), "has no substrate coupling"),
+    (dict(segments=11), "must be 1 to 10"),
+    (dict(substrate="shared"), "must be one of auto"),
+    (dict(peak_q_weight=-1.0), "peak-Q weight must be a positive number"),
+    (dict(shunt_accuracy=0.0), "shunt accuracy must be a positive number"),
+])
+def test_an_impossible_option_set_is_refused_with_the_reason(kw, why):
+    with pytest.raises(ValueError, match=why):
+        fitmod.check_options(2, **kw)
+
+
+def test_the_center_tapped_model_refuses_coupling_and_a_fourth_port():
+    with pytest.raises(ValueError, match="has no substrate coupling"):
+        fitmod.check_options(3, substrate="symmetric+coupling")
+    with pytest.raises(ValueError, match="center tap port must be 1, 2 or 3"):
+        fitmod.check_options(3, center_tap=4)
+    res = _convert(IND_CT, "inductor-ct", substrate="asymmetric+coupling")
+    assert not res.ok and "has no substrate coupling" in res.error
+
+
+def test_the_center_tap_may_be_on_any_port(center_tap):
+    """The bundled coil with its ports turned round (center tap on port 1): detected, the
+    same coil comes out, and the netlist keeps the file's pin order."""
+    net = _net(IND_CT)
+    order = [2, 0, 1]
+    turned = skrf.Network(frequency=net.frequency, s=net.s[:, order][:, :, order], z0=50)
+    res = engine.convert(ConverterState(mode="structure", structure_key="inductor-ct",
+                                        coil_segments=2), turned)
+    assert res.ok, res.error
+    assert res.metrics["ct_port"] == res.metrics["ct_detected"] == 1
+    assert "center tap on port 1 (detected)" in res.messages[0]
+    assert "Rct m p1" in res.ngspice and "Cs p2 p3" in res.ngspice
+    ref, vals = _values(center_tap), _values(res)
+    for lab in ("R_s,h1", "R_s,h2", "C_s", "R_ct", "C_ox1", "C_ox,ct"):
+        assert vals[lab] == pytest.approx(ref[lab], rel=1e-2), lab
+    # the netlist against the fit's own model, which runs in the order (end, end, tap)
+    p = np.array([vals[_row(n, 0.0)[0]] for n in fitmod.CT_PARAM_NAMES])
+    Y = fitmod.y_model_ct(p, 2 * np.pi * res.freq, 2)
+    back = np.argsort([1, 2, 0])
+    S = skrf.network.y2s(Y[:, back][:, :, back], z0=50)
+    assert np.max(np.abs(res.model_s - S)) < 1e-9
+    assert res.default_plots[2:] == ["L22 / Q22", "S32"]
+    assert "L22 / Q22" in res.aux_traces
+
+
+def test_a_set_center_tap_overrides_the_detection_and_says_so():
+    res = _convert(IND_CT, "inductor-ct", basic_model=True, center_tap=1)
+    assert res.ok and res.metrics["ct_port"] == 1 and res.metrics["ct_detected"] == 3
+    assert "center tap on port 1 (set)" in res.messages[0]
+    assert any("port 3 looks like the center tap" in m for m in res.messages)
+
+
+def test_shunt_accuracy_recovers_the_substrate_from_noisy_data():
+    """Volker's test: known element values plus S noise of 1e-3.  Without the floor, the
+    fit chases the noise in the tiny low-frequency shunt branch and C_ox lands about 20 to
+    30 % off.  With it, C_ox comes back within a few percent."""
+    p = dict(Rs=1.9, Ls=0.5e-9, Rskin1=1.6, Lskin1=2e-11, Rskin2=1.0, Lskin2=1e-30,
+             Cs=7e-15, Cox1=25e-15, Rsi1=1500.0, Csi1=27e-15, Cox2=25e-15, Rsi2=1500.0,
+             Csi2=27e-15, Rsub12=1e15, Csub12=1e-30)
+    f = _net(IND).f
+    S = skrf.network.y2s(fitmod.y_model(np.array([p[n] for n in fitmod.PARAM_NAMES]),
+                                        2 * np.pi * f, 1), z0=50)
+    rng = np.random.default_rng(1)
+    S = S + 1e-3 * (rng.normal(size=S.shape) + 1j * rng.normal(size=S.shape)) / np.sqrt(2)
+    noisy = skrf.Network(frequency=skrf.Frequency.from_f(f, unit="hz"),
+                         s=(S + np.transpose(S, (0, 2, 1))) / 2, z0=50)
+    err = {k: abs(fitmod.fit_two_port(noisy, basic=True, shunt_accuracy=k).values["Cox1"]
+                  / p["Cox1"] - 1) for k in (None, fitmod.DEFAULT_SHUNT_ACCURACY)}
+    assert err[0.01] < 0.10 and err[0.01] < 0.5 * err[None], err
+
+
+def test_peak_q_weight_tightens_q_around_its_peak():
+    """On the bundled 500 pH coil the basic model misses Q11 near its peak by about 4 %,
+    with the default weight by under 2 %."""
+    net = _net(IND)
+    w = 2 * np.pi * net.f
+    _, q_data = fitmod.l_and_q(net.y[:, 0, 0], w)
+    band = q_data >= fitmod.PEAK_Q_LEVEL * q_data.max()
+
+    def peak_error(**kw):
+        fit = fitmod.fit_two_port(net, basic=True, **kw)
+        p = np.array([fit.values[n] for n in fitmod.PARAM_NAMES])
+        _, q = fitmod.l_and_q(fitmod.y_model(p, w, 1)[:, 0, 0], w)
+        return np.sqrt(np.mean((q[band] / q_data[band] - 1) ** 2)), fit.messages
+
+    plain, _ = peak_error()
+    weighted, msgs = peak_error(peak_q_weight=fitmod.DEFAULT_PEAK_Q_WEIGHT)
+    assert weighted < 0.6 * plain, (plain, weighted)
+    assert any(m.startswith("peak-Q weight 2: L and Q weighted up to 3x") for m in msgs)
 
 
 def test_the_inductors_lead_the_dropdown_and_the_defaults_did_not_move():

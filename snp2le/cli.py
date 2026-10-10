@@ -13,6 +13,10 @@
     # wideband inductor model, fitted over the whole band (no f_ext)
     snp2le -b convert ind.s2p --mode structure --structure inductor-wideband --values
 
+    # center-tapped inductor from measured data, Q emphasised around its peak
+    snp2le -b convert ct.s3p --mode structure --structure inductor-ct \\
+        --shunt-accuracy --peak-q-weight 3 --ct-port 1
+
     # fit only the 110 to 170 GHz sub-band of a wider EM sweep
     snp2le -b convert core.s7p --mode universal --order 24 --fmin 110GHz --fmax 170GHz
 
@@ -42,7 +46,7 @@ import time
 from snp2le.core import io, engine, units, netlist, universal
 from snp2le.core.progress import format_duration
 from snp2le.core.state import ConverterState
-from snp2le.core.structures import get_structure, structure_items
+from snp2le.core.structures import get_structure, inductor_fit, structure_items
 
 # extensions in the testbench's data folder that are never a result table
 _NON_DATA = {".raw", ".spice", ".inc", ".cir", ".net", ".log", ".out", ".svg", ".png",
@@ -127,6 +131,41 @@ def _stages(text):
     if not 1 <= n <= 10:
         raise argparse.ArgumentTypeError(f"--stages must be between 1 and 10 (got {n})")
     return n
+
+
+def _coil_segments(text):
+    """argparse type for the wideband inductors' fixed coil segment count."""
+    lo, hi = inductor_fit.SEGMENT_RANGE
+    try:
+        n = int(text)
+    except Exception:                                       # noqa: BLE001
+        raise argparse.ArgumentTypeError(f"invalid segment count '{text}' (an integer "
+                                         f"{lo}..{hi})")
+    if not lo <= n <= hi:
+        raise argparse.ArgumentTypeError(f"--segments must be between {lo} and {hi} (got {n})")
+    return n
+
+
+def _positive(text):
+    """argparse type for a positive number (the wideband fit weights)."""
+    try:
+        v = float(text)
+    except Exception:                                       # noqa: BLE001
+        # the value is optional, so an input file right after the option lands here
+        raise argparse.ArgumentTypeError(f"invalid number '{text}' (an option without a "
+                                         f"value goes after the input files)")
+    if not (v > 0 and v != float("inf")):
+        raise argparse.ArgumentTypeError(f"must be a positive number (got {text})")
+    return v
+
+
+def _wideband_options_given(args):
+    """The wideband fit options set on the command line, by their option names."""
+    return [name for name, on in (("--basic", args.basic), ("--segments", args.segments),
+                                  ("--substrate", args.substrate != "auto"),
+                                  ("--peak-q-weight", args.peak_q_weight),
+                                  ("--shunt-accuracy", args.shunt_accuracy),
+                                  ("--ct-port", args.ct_port)) if on]
 
 
 def _passivity_ceiling(text):
@@ -401,10 +440,24 @@ def cmd_convert(args):
               "raw fit untouched", file=sys.stderr)
     p_ceiling = (universal.PASSIVITY_CEILING_DEFAULT if args.passivity_ceiling is None
                 else args.passivity_ceiling)
-    if args.basic and not (args.mode == "structure"
-                           and get_structure(args.structure).wideband):
-        print("[WARN] --basic is ignored, it applies to the wideband inductor structures "
-              "(inductor-wideband, inductor-ct) only", file=sys.stderr)
+    given = _wideband_options_given(args)
+    struct = get_structure(args.structure) if args.mode == "structure" else None
+    if given and not (struct is not None and struct.wideband):
+        print(f"[WARN] {', '.join(given)} ignored, these apply to the wideband inductor "
+              f"structures (inductor-wideband, inductor-ct) only", file=sys.stderr)
+    elif given:
+        if args.ct_port is not None and struct.n_ports != 3:
+            print("[WARN] --ct-port is ignored, it applies to inductor-ct only",
+                  file=sys.stderr)
+        try:                                  # the fit's own rules, before any file is read
+            inductor_fit.check_options(
+                struct.n_ports, basic=args.basic, segments=args.segments,
+                substrate=args.substrate, peak_q_weight=args.peak_q_weight,
+                shunt_accuracy=args.shunt_accuracy,
+                center_tap=args.ct_port if struct.n_ports == 3 else None)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     if args.thermal_noise and args.mode == "structure":
         print("[WARN] --thermal-noise is ignored in structure mode, whose resistors are the "
               "structure's loss and always carry their thermal noise", file=sys.stderr)
@@ -424,7 +477,10 @@ def cmd_convert(args):
             max_order=args.order, enforce_passivity=args.passive,
             passivity_ceiling=p_ceiling, thermal_noise=args.thermal_noise,
             f_extract=args.fext, n_segments=args.stages, iso_resistor=args.iso_r,
-            basic_model=args.basic, f_min=args.fmin, f_max=args.fmax)
+            basic_model=args.basic, coil_segments=args.segments or 0,
+            substrate=args.substrate, peak_q_weight=args.peak_q_weight or 0.0,
+            shunt_accuracy=args.shunt_accuracy or 0.0, center_tap=args.ct_port or 0,
+            f_min=args.fmin, f_max=args.fmax)
         bar = _progress_for(args, os.path.basename(src))
         t_start = time.monotonic()
         try:
@@ -580,9 +636,31 @@ def build_parser():
     c.add_argument("--iso-r", dest="iso_r", action="store_true", default=True,
                    help="include the Wilkinson isolation R or branch-line arm loss")
     c.add_argument("--no-iso-r", dest="iso_r", action="store_false")
+    # wideband inductor fit (inductor-wideband, inductor-ct)
+    seg_lo, seg_hi = inductor_fit.SEGMENT_RANGE
     c.add_argument("--basic", action="store_true", default=False,
                    help="fixed basic topology: 1 coil segment, 1 skin section, no substrate "
                         "coupling (inductor-wideband, inductor-ct)")
+    c.add_argument("--segments", type=_coil_segments, default=None, metavar="N",
+                   help=f"fixed coil segment count, {seg_lo} to {seg_hi}, per half for "
+                        f"inductor-ct (default: the fit picks the fewest of 1 to 3 within "
+                        f"10 %% of the best)")
+    c.add_argument("--substrate", choices=inductor_fit.SUBSTRATE_CHOICES, default="auto",
+                   help="substrate network (default auto: symmetric where the data is, "
+                        "coupling only where needed and plausible). inductor-ct takes "
+                        "auto, symmetric or asymmetric")
+    c.add_argument("--peak-q-weight", type=_positive, nargs="?", metavar="A", default=None,
+                   const=inductor_fit.DEFAULT_PEAK_Q_WEIGHT,
+                   help=f"weight L and Q up to 1+A times where the data's Q is at least "
+                        f"{inductor_fit.PEAK_Q_LEVEL} x its peak, e.g. for a VCO tank "
+                        f"(A = {inductor_fit.DEFAULT_PEAK_Q_WEIGHT:g} without a value)")
+    c.add_argument("--shunt-accuracy", type=_positive, nargs="?", metavar="K", default=None,
+                   const=inductor_fit.DEFAULT_SHUNT_ACCURACY,
+                   help=f"measure substrate errors against at least K x the series branch, "
+                        f"for measured or FDTD data (K = "
+                        f"{inductor_fit.DEFAULT_SHUNT_ACCURACY:g} without a value)")
+    c.add_argument("--ct-port", type=int, choices=(1, 2, 3), default=None,
+                   help="center tap port of inductor-ct (default: detected from the data)")
     # output
     c.add_argument("--format", choices=["ngspice", "vacask", "both"], default="ngspice")
     c.add_argument("-o", "--output", default=None, help="output path (single input)")

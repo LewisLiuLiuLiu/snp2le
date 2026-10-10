@@ -45,14 +45,15 @@ does not match the loaded file are greyed out:
   C<sub>ox</sub>&nbsp;&ndash;&nbsp;(R<sub>si</sub>&nbsp;||&nbsp;C<sub>si</sub>) substrate
   network at each port. The fit uses the data up to 1.2&nbsp;x the self-resonance
   frequency, splits an electrically long coil into up to 3 segments, and keeps the model
-  symmetric where the data is. <b>Inductor (center tap)</b> expects the coil ends on ports
-  1 and 2 and the center tap on port 3, and couples its two half coils with k. A fit takes
-  a few seconds (up to about 15&nbsp;s for the center tap). Keep the low-frequency data in
-  the fit range: it pins down the DC resistance and inductance.</li>
+  symmetric where the data is. <b>Inductor (center tap)</b> couples its two half coils with
+  k and finds the center tap itself (the port in the middle of the coil), the Conversion
+  panel names it. A fit takes a few seconds (up to about 15&nbsp;s for the center tap).
+  Keep the low-frequency data in the fit range: it pins down the DC resistance and
+  inductance.</li>
 <li><b>f<sub>ext</sub></b> (structure mode): the single frequency at which the lumped
 values are read off the data. Accepts engineering notation (e.g. <i>7&nbsp;GHz</i>). If
-it is outside the data it falls back to the device's natural design point. Hidden for the
-wideband inductors, which have no extraction frequency.</li>
+it is outside the data it falls back to the device's natural design point. The wideband
+inductors have no extraction frequency and show their own options in its place (below).</li>
 <li><b>Max order</b> (universal mode): the largest model order the vector fit may use,
 counted as n<sub>real</sub> + 2 x n<sub>complex</sub>, which is also the number of internal
 states in the netlist. A higher order tracks sharp resonances but enlarges the netlist. The
@@ -128,10 +129,28 @@ shows the band actually fitted, highlighted while it is a sub-band.</li>
   <li><b>Resistive loss</b>: add fitted series resistance to the branch-line
   coupler's arms (one arm Q matched to the device's loss), lifting its otherwise ideal
   reflection and isolation terms toward the measured values.</li>
-  <li><b>Basic model</b>: fit the wideband inductors with a fixed topology, 1 coil
-  segment, 1 skin section and no substrate coupling, so every fit has the same elements
-  (e.g. for data tables). Untick to let the fit add what the data needs.</li>
   </ul></li>
+<li><b>Wideband inductor options</b> (in place of f<sub>ext</sub> for the two wideband
+inductors):
+  <ul>
+  <li><b>Basic model</b>: a fixed topology, 1 coil segment, 1 skin section and no
+  substrate coupling, so every fit has the same elements (e.g. for data tables). Untick to
+  let the fit add what the data needs.</li>
+  <li><b>Segments</b> (2-port): <i>auto</i> lets the fit pick the fewest of 1, 2 and 3
+  segments within 10&nbsp;% of the best, a number fixes it. <b>Basic model</b> fixes it
+  at 1.</li>
+  <li><b>Center tap</b> (center-tapped inductor): <i>auto</i> takes the port the data puts
+  in the middle of the coil, a number sets it. The netlist keeps the file's port order
+  either way.</li>
+  <li><b>Peak-Q weight</b>: weights L and Q up to 3x where the data's Q is at least
+  0.8&nbsp;x its peak, e.g. for a VCO tank, at a little more error elsewhere.</li>
+  <li><b>Measured data</b>: for measured or FDTD data, tolerates substrate errors below
+  0.01&nbsp;x the series branch, so noise at low frequency cannot pull the substrate values
+  off. Clean EM data does not need it.</li>
+  </ul>
+  The CLI also takes other weights, up to 10 segments and a fixed substrate network
+  (<tt>--peak-q-weight</tt>, <tt>--shunt-accuracy</tt>, <tt>--segments</tt>,
+  <tt>--substrate</tt>, <tt>--ct-port</tt>).</li>
 <li><b>View</b>: the two-segment switch at the right of the title bar, holding
 <i>Design&nbsp;&amp;&nbsp;Schematic</i> and <i>Plot</i> side by side. The view you are on
 is the filled one, and one click moves to the other. It follows the plots too: popping

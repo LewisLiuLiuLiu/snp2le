@@ -93,12 +93,14 @@ is not a wideband fit, which keeps a slow fit from starting on its own. The thre
 inductors lead the dropdown, and a 3-port still opens on the in-phase Wilkinson.
 
 A structure fitted over the whole band instead of read off at f_ext sets
-`wideband = True`. The engine then calls its `extract()` with two more keywords,
-`basic` (`ConverterState.basic_model`) and `progress` (a `callback(fraction, message)`
-for the extract stage), skips the f_ext range note, and moves `metrics["messages"]`
-into `Results.messages`. The GUI hides f_ext and shows *Basic model* for it, the
-Result panel shows `metrics["f_fit_max"]` as *fitted up to*, and the CLI prints the
-fit band and `metrics["segments"]` in place of f_ext.
+`wideband = True`. The engine then calls its `extract()` with `progress` (a
+`callback(fraction, message)` for the extract stage) and the fit options of
+`inductor_wideband.wideband_options(state)` as keywords, skips the f_ext range note,
+moves `metrics["messages"]` into `Results.messages`, and passes the IR to
+`freq_traces()` and `default_plots()` so their views can follow the fitted port order.
+The GUI shows its own page in place of f_ext (`TopBar.wide_page`), the Result panel shows
+`metrics["f_fit_max"]` as *fitted up to*, and the CLI prints the fit band and
+`metrics["segments"]` in place of f_ext.
 
 
 ## Developing
@@ -205,20 +207,36 @@ pytest
   bundled center-tapped fit has L_s,h and k 4.5 % and R_skin2 2.3 x away from Windows
   (numpy 2.4, scipy 1.17), at a 0.2 % lower cost, while L, Q, the SRF and the
   well-determined elements agree within 0.3 %. The skin section whose corner lies above the
-  band and the split between L_s,h and k are those directions. It chooses 1 to 3 coil segments (the fewest within 10 % of the
-  best cost), decides port and half-coil symmetry from the data (5 % threshold), and keeps
-  a 2-port substrate coupling only if it improves the cost by more than 10 % and passes a
+  band and the split between L_s,h and k are those directions.
+  By default the fit chooses 1 to 3 coil segments (the fewest within 10 % of the best
+  cost), decides port and half-coil symmetry from the data (5 % threshold), and keeps a
+  2-port substrate coupling only if it improves the cost by more than 10 % and passes a
   plausibility check. `structures/inductor_wideband.py` turns the totals into one set of
   elements per segment, with the substrate network distributed over the coil nodes, and
   couples every half-1 cell to every half-2 cell with k/segments, which is the fit's
   M/segments^2 per cell pair. The rebuilt response matches the fit's own model function to
-  1e-9 in S (`tests/test_inductor_wideband.py`). The center-tapped model expects the
-  center tap on port 3 and says so when the data puts it elsewhere. Its k is the
-  effective coupling including the center tap lead inductance, which terminal data cannot
-  separate from M. Not ported: inductor_fit's `--peak-q-weight`, `--shunt-accuracy`,
-  `--segments`, `--substrate` and `--ct-port` overrides. A full fit takes 3 s (2-port)
-  to 15 s (center tap) on the bundled examples, the basic model about 1 s. A values table
-  longer than 12 rows is shown in two columns (`design_view._ONE_COLUMN_ROWS`).
+  1e-9 in S (`tests/test_inductor_wideband.py`). Its k is the effective coupling
+  including the center tap lead inductance, which terminal data cannot separate from M.
+  A full fit takes 3 s (2-port) to 15 s (center tap) on the bundled examples, the basic
+  model 1 s or less. A values table longer than 12 rows is shown in two columns
+  (`design_view._ONE_COLUMN_ROWS`).
+* inductor_fit's options are all ported: a fixed segment count (`coil_segments`, 1 to 10),
+  a fixed substrate variant (`substrate`), the peak-Q weight A and the shunt accuracy K
+  (`peak_q_weight`, `shunt_accuracy`, defaults 2 and 0.01), and the center tap port
+  (`center_tap`). 0 and "auto" in `ConverterState` leave the choice to the fit, and
+  `inductor_fit.check_options()` is the one place that refuses an impossible set (basic
+  with more than 1 segment, basic or the 3-port with substrate coupling), which the CLI
+  calls before it reads a file and the engine reaches through the fit. The center tap
+  defaults to the port the low-frequency data puts in the middle of the coil: with the
+  other two ports grounded, current from a coil end mostly leaves through the nearby
+  center tap, so the two coil ends share the weakest transfer admittance
+  (`inductor_fit._center_tap_hint`). The fit reorders the data to (end, end, tap), and the
+  IR keeps the file's port order, so the pins match the EM ports. A deliberately wrong
+  port still fits and says which port the data points at. The GUI page offers *Basic
+  model*, *Segments* 1 to 3 (*Center tap* for the 3-port), and the two weights as tick
+  boxes at their defaults. The substrate variant, other weights and more segments are CLI
+  only, and the GUI always sends the values its controls show, so a hand-edited design
+  cannot carry a hidden option into a GUI conversion.
 * `fit_universal` wraps the fit in `contextlib.redirect_stdout/stderr` to
   swallow scikit-rf's chatter, and those rebind `sys.stdout` / `sys.stderr` for
   the whole process, not for one thread. That was harmless while the fit blocked

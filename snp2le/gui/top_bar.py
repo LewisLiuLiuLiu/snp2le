@@ -16,6 +16,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from snp2le import __version__
 from snp2le.core.structures import default_structure, get_structure, structure_items
+from snp2le.core.structures.inductor_fit import (DEFAULT_PEAK_Q_WEIGHT,
+                                                 DEFAULT_SHUNT_ACCURACY, PEAK_Q_LEVEL)
 from snp2le.core import xschem
 from snp2le.core.units import parse_eng, format_eng
 from snp2le.core.universal import (PASSIVITY_CEILING_DEFAULT, PASSIVITY_CEILING_MAX,
@@ -71,6 +73,14 @@ def _load_icon(color="#ffffff"):
     p.drawRoundedRect(QtCore.QRectF(6, 12, 20, 12.5), 2.0, 2.0)    # body
     p.end()
     return QtGui.QIcon(pm)
+
+
+def _state_number(state, name, cast):
+    """A number field of a loaded design, 0 when it is missing or not a number."""
+    try:
+        return cast(getattr(state, name, 0) or 0)
+    except (TypeError, ValueError):
+        return cast(0)
 
 
 def _set_item_enabled(combo, index, enabled):
@@ -183,13 +193,43 @@ class TopBar(QtWidgets.QWidget):
         self.iso_r.setMinimumWidth(
             self.iso_r.fontMetrics().horizontalAdvance("Resistive loss") + 28)
 
-        # wideband inductors: the fixed topology instead of the one the fit picks
-        self.basic = QtWidgets.QCheckBox("Basic model"); self.basic.setChecked(False)
+        # wideband inductors (fitted over the band, no f_ext), on their own page below.  The
+        # tick boxes are two lines like 'Enforce passivity', which is what fits all four.
+        self.basic = QtWidgets.QCheckBox("Basic\nmodel"); self.basic.setObjectName("wrapCheck")
         self.basic.setToolTip(
             "Fit the fixed basic topology: 1 coil segment, 1 skin section and no\n"
             "substrate coupling, so every fit has the same elements (e.g. for data tables).\n"
             "Untick to let the fit add segments, a second skin section and the substrate\n"
             "coupling where the data needs them.")
+        self.coil_segments = QtWidgets.QComboBox()
+        self.center_tap = QtWidgets.QComboBox()
+        for combo in (self.coil_segments, self.center_tap):
+            for text, n in (("auto", 0), ("1", 1), ("2", 2), ("3", 3)):
+                combo.addItem(text, n)
+        self.coil_segments.setToolTip(
+            "Coil segments of the model. auto lets the fit pick the fewest of 1, 2 and 3\n"
+            "that fit within 10 % of the best. A fixed count gives every fit the same\n"
+            "topology and netlist size. 'Basic model' fixes it at 1.")
+        self.center_tap.setToolTip(
+            "Port of the center tap. auto takes the port the data puts in the middle of\n"
+            "the coil, where the two coil ends share the weakest transfer admittance.\n"
+            "Set it when the Conversion panel names a different port than you expect.")
+        self._segments_pinned = False        # Segments shows 1 while 'Basic model' is ticked
+        self._segments_before_basic = 0      # and gets this index back when it is unticked
+        self.peak_q = QtWidgets.QCheckBox("Peak-Q\nweight"); self.peak_q.setObjectName("wrapCheck")
+        self.peak_q.setToolTip(
+            f"Weight L and Q up to {1 + DEFAULT_PEAK_Q_WEIGHT:g}x where the data's Q is at "
+            f"least {PEAK_Q_LEVEL} x its peak,\n"
+            "e.g. for a VCO tank. On 9 datasets this halved the error of the peak Q, at a\n"
+            "little more error elsewhere. The CLI takes other weights (--peak-q-weight).")
+        self.measured = QtWidgets.QCheckBox("Measured\ndata")
+        self.measured.setObjectName("wrapCheck")
+        self.measured.setToolTip(
+            "For measured or FDTD data: substrate (shunt) errors below "
+            f"{DEFAULT_SHUNT_ACCURACY:g} x the series branch\n"
+            "are tolerated, so noise at low frequency cannot pull the substrate values off.\n"
+            "Clean EM data (e.g. Palace) does not need it. The CLI takes other values\n"
+            "(--shunt-accuracy).")
 
         self.order = QtWidgets.QSpinBox(); self.order.setRange(2, 40); self.order.setValue(6)
         self.order.setFixedWidth(66)          # two digits plus the arrows, no more
@@ -244,18 +284,17 @@ class TopBar(QtWidgets.QWidget):
         # only for the structure it belongs to (otherwise hidden entirely)
         self.stages_box = self._labeled_widget("Stages", self.stages)
         self.iso_r_box = self._labeled_widget("", self.iso_r)
-        self.basic_box = self._labeled_widget("", self.basic)
         # a stacked slot sized to its widest page holds whichever option applies, so
         # selecting one never changes the bar width (window opens wide and stays put)
         self.opt_box = QtWidgets.QStackedWidget()
         self._opt_empty = QtWidgets.QWidget()
-        for w in (self._opt_empty, self.stages_box, self.iso_r_box, self.basic_box):
+        for w in (self._opt_empty, self.stages_box, self.iso_r_box):
             self.opt_box.addWidget(w)
 
         # the controls between Structure and the divider depend on the mode: universal
-        # shows max order + passivity, structure shows f_ext + the option.  A stack
-        # holds both pages and reserves the wider one, so the bar width and the divider
-        # position never change with the mode either.
+        # shows max order + passivity, structure shows f_ext + the option, and a wideband
+        # inductor its own four.  A stack holds the pages and reserves the widest, so the
+        # bar width and the divider position never change with the mode either.
         self.uni_page = QtWidgets.QWidget()
         up = QtWidgets.QHBoxLayout(self.uni_page); up.setContentsMargins(0, 0, 0, 0)
         up.setSpacing(_GAP)
@@ -267,12 +306,24 @@ class TopBar(QtWidgets.QWidget):
         self.struct_page = QtWidgets.QWidget()
         sp = QtWidgets.QHBoxLayout(self.struct_page); sp.setContentsMargins(0, 0, 0, 0)
         sp.setSpacing(_GAP)
-        # a widget, not a layout, so a wideband structure can hide it
-        self.f_ext_box = self._labeled_widget("<i>f</i><sub>ext</sub>", self.f_ext)
-        sp.addWidget(self.f_ext_box)
+        sp.addLayout(self._labeled("<i>f</i><sub>ext</sub>", self.f_ext))
         sp.addWidget(self.opt_box); sp.addStretch(1)
+        # The drop-down takes whatever width the page has to spare, instead of a stretch at
+        # the end, so the gap to the fit range is one _GAP like every other gap in the strip.
+        # Segments for the 2-port, Center tap for the center-tapped model.
+        self.wide_page = QtWidgets.QWidget()
+        wp = QtWidgets.QHBoxLayout(self.wide_page); wp.setContentsMargins(0, 0, 0, 0)
+        wp.setSpacing(_GAP)
+        self.segments_box = self._labeled_widget("Segments", self.coil_segments)
+        self.ct_box = self._labeled_widget("Center tap", self.center_tap)
+        wp.addLayout(self._labeled("", self.basic))
+        wp.addWidget(self.segments_box, 1)
+        wp.addWidget(self.ct_box, 1)
+        wp.addLayout(self._labeled("", self.peak_q))
+        wp.addLayout(self._labeled("", self.measured))
         self.mode_stack = QtWidgets.QStackedWidget()
-        self.mode_stack.addWidget(self.uni_page); self.mode_stack.addWidget(self.struct_page)
+        for page in (self.uni_page, self.struct_page, self.wide_page):
+            self.mode_stack.addWidget(page)
 
         # fit range: the band of the loaded file the model is fitted to.  It applies to
         # both modes, so it sits outside the mode stack.  Both fields are in GHz (the
@@ -385,7 +436,11 @@ class TopBar(QtWidgets.QWidget):
         self.f_max.editingFinished.connect(self._on_band)
         self.stages.valueChanged.connect(lambda _=None: self.changed.emit())
         self.iso_r.toggled.connect(lambda _=None: self.changed.emit())
-        self.basic.toggled.connect(lambda _=None: self.changed.emit())
+        self.basic.toggled.connect(self._on_change)         # also pins Segments at 1
+        self.coil_segments.currentIndexChanged.connect(lambda _=None: self.changed.emit())
+        self.center_tap.currentIndexChanged.connect(lambda _=None: self.changed.emit())
+        self.peak_q.toggled.connect(lambda _=None: self.changed.emit())
+        self.measured.toggled.connect(lambda _=None: self.changed.emit())
         self.order.valueChanged.connect(lambda _=None: self.changed.emit())
         self.passive.toggled.connect(self._on_change)      # also greys the ceiling field
         self.p_ceiling.editingFinished.connect(self._on_ceiling)
@@ -404,8 +459,9 @@ class TopBar(QtWidgets.QWidget):
 
         Also unticks 'Show output' and clears the run-status label so the bar
         matches a freshly-opened window. The caller recomputes once."""
-        widgets = (self.mode, self.structure, self.stages, self.iso_r, self.basic, self.order,
-                   self.passive, self.thermal_noise, self.sim_output, self.simulator)
+        widgets = (self.mode, self.structure, self.stages, self.iso_r, *self._wideband_widgets(),
+                   self.order, self.passive, self.thermal_noise, self.sim_output,
+                   self.simulator)
         for w in widgets:
             w.blockSignals(True)
         self.mode.setCurrentIndex(0)                       # universal
@@ -415,6 +471,11 @@ class TopBar(QtWidgets.QWidget):
         self.stages.setValue(2)
         self.iso_r.setChecked(True)
         self.basic.setChecked(False)
+        self._segments_before_basic = 0
+        for combo in (self.coil_segments, self.center_tap):
+            combo.setCurrentIndex(0)                       # auto
+        self.peak_q.setChecked(False)
+        self.measured.setChecked(False)
         self.order.setValue(6)
         self.passive.setChecked(True)
         self.thermal_noise.setChecked(False)
@@ -474,8 +535,8 @@ class TopBar(QtWidgets.QWidget):
         Signals are blocked so this does not trigger a recompute. The caller
         recomputes once afterwards.
         """
-        widgets = (self.mode, self.structure, self.stages, self.iso_r, self.basic, self.order,
-                   self.passive, self.thermal_noise)
+        widgets = (self.mode, self.structure, self.stages, self.iso_r, *self._wideband_widgets(),
+                   self.order, self.passive, self.thermal_noise)
         for w in widgets:
             w.blockSignals(True)
         mi = self.mode.findData(state.mode)
@@ -486,7 +547,18 @@ class TopBar(QtWidgets.QWidget):
             self.structure.setCurrentIndex(si)
         self.stages.setValue(int(state.n_segments))
         self.iso_r.setChecked(bool(state.iso_resistor))
+        # the wideband options the GUI has controls for.  A value only the CLI can set (5
+        # segments, another weight) shows as the nearest control state and is replaced by
+        # it on the next pull, so what the window converts is always what it shows.
         self.basic.setChecked(bool(getattr(state, "basic_model", False)))
+        self._segments_pinned = False         # the design's own count, pinned again below
+        self.coil_segments.setEnabled(True)
+        for combo, name in ((self.coil_segments, "coil_segments"),
+                            (self.center_tap, "center_tap")):
+            combo.setCurrentIndex(max(combo.findData(_state_number(state, name, int)), 0))
+        self._segments_before_basic = self.coil_segments.currentIndex()
+        self.peak_q.setChecked(_state_number(state, "peak_q_weight", float) > 0)
+        self.measured.setChecked(_state_number(state, "shunt_accuracy", float) > 0)
         self.order.setValue(int(state.max_order))
         self.passive.setChecked(bool(state.enforce_passivity))
         self.thermal_noise.setChecked(bool(getattr(state, "thermal_noise", False)))
@@ -513,8 +585,6 @@ class TopBar(QtWidgets.QWidget):
             if self._p_ceiling != PASSIVITY_CEILING_DEFAULT:
                 self._set_ceiling(PASSIVITY_CEILING_DEFAULT)
         self.structure.setEnabled(is_struct)       # greyed in universal mode
-        # show the mode's own controls: structure -> f_ext + option, universal -> order + passivity
-        self.mode_stack.setCurrentWidget(self.struct_page if is_struct else self.uni_page)
         # grey structures that don't match the loaded port count
         cur = self.structure.currentIndex()
         first_ok = None
@@ -532,19 +602,43 @@ class TopBar(QtWidgets.QWidget):
             self.structure.blockSignals(True)
             self.structure.setCurrentIndex(idx if idx >= 0 else first_ok)
             self.structure.blockSignals(False)
-        # structure-specific option: show only the page for the chosen structure
+        # show the mode's own controls: universal -> order + passivity, structure -> f_ext +
+        # option, a wideband inductor -> its own page (fitted over the band, no f_ext)
         key = self.structure.currentData()
-        self.iso_r.setText("Resistive loss" if key == "branchline" else "Isolation R")
         wideband = is_struct and self._struct_wideband.get(key, False)
-        self.f_ext_box.setVisible(not wideband)              # fitted over the band
+        self.mode_stack.setCurrentWidget(self.wide_page if wideband
+                                         else self.struct_page if is_struct else self.uni_page)
+        center_tapped = self._struct_ports.get(key) == 3
+        self.segments_box.setVisible(not center_tapped)
+        self.ct_box.setVisible(center_tapped)
+        self._pin_segments(self.basic.isChecked())
+        # structure-specific option: show only the page for the chosen structure
+        self.iso_r.setText("Resistive loss" if key == "branchline" else "Isolation R")
         if is_struct and key == "tline-rlgc":               # RLGC line only
             self.opt_box.setCurrentWidget(self.stages_box)
-        elif wideband:
-            self.opt_box.setCurrentWidget(self.basic_box)
         elif is_struct and key in ("wilkinson-inphase", "branchline"):
             self.opt_box.setCurrentWidget(self.iso_r_box)   # isolation R / resistive loss
         else:
             self.opt_box.setCurrentWidget(self._opt_empty)
+
+    def _wideband_widgets(self):
+        return (self.basic, self.coil_segments, self.center_tap, self.peak_q, self.measured)
+
+    def _pin_segments(self, pinned):
+        """The basic model has 1 coil segment, so Segments shows 1, greyed, while 'Basic
+        model' is ticked, and gets back what it showed before when it is unticked."""
+        if pinned == self._segments_pinned:
+            return
+        combo = self.coil_segments
+        combo.blockSignals(True)
+        if pinned:
+            self._segments_before_basic = combo.currentIndex()
+            combo.setCurrentIndex(combo.findData(1))
+        else:
+            combo.setCurrentIndex(self._segments_before_basic)
+        combo.blockSignals(False)
+        combo.setEnabled(not pinned)
+        self._segments_pinned = pinned
 
     def _on_change(self, *_):
         self._apply_constraints()
@@ -699,6 +793,11 @@ class TopBar(QtWidgets.QWidget):
             "n_segments": int(self.stages.value()),
             "iso_resistor": bool(self.iso_r.isChecked()),
             "basic_model": bool(self.basic.isChecked()),
+            "coil_segments": 0 if self.basic.isChecked() else int(self.coil_segments.currentData()),
+            "substrate": "auto",                 # CLI only (--substrate)
+            "peak_q_weight": DEFAULT_PEAK_Q_WEIGHT if self.peak_q.isChecked() else 0.0,
+            "shunt_accuracy": DEFAULT_SHUNT_ACCURACY if self.measured.isChecked() else 0.0,
+            "center_tap": int(self.center_tap.currentData()),
             "max_order": int(self.order.value()),
             "enforce_passivity": bool(self.passive.isChecked()),
             "passivity_ceiling": float(self._p_ceiling),
