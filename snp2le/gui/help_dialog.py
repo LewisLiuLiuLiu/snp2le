@@ -102,14 +102,19 @@ block. Ticked, snp2le computes a noise generator from the fitted model (its spec
 and appends it to the subcircuit: one 0.25&nbsp;&Omega; resistor per port
 (<tt>Rnz_e1</tt>, <tt>Rnz_e2</tt>, ...) is the only noise source, driving controlled sources
 that inject the correlated noise waves into the ports. Nothing feeds back into the fitted
-network, so the S-parameters and the operating point stay exactly as they are. Any noise
-analysis then sees the block's noise, as the sum of its <tt>Rnz_e*</tt> contributions.
+network, so the S-parameters and the operating point stay exactly as they are. A noise
+analysis shows the block's noise as the sum of its <tt>Rnz_e*</tt> contributions. VACASK
+sees it in <tt>noise</tt>, <tt>hbnoise</tt>, <tt>pnoise</tt> and transient noise, Ngspice in
+<tt>.noise</tt> only, since it has no periodic noise analysis and adds no resistor noise to a
+transient run. The noise is only as good as the loss in the S-parameter data.
 <p><b>It needs a strictly passive model</b>, so keep <b>Enforce passivity</b> ticked at
 <i>1.00</i>. If the model is not strictly passive anywhere, far outside the data included,
 no generator exists: the noise is not added, the <i>noise</i> result reads <i>NOT added</i>,
 the message line names &sigma;<sub>max</sub>, and <b>Export</b> refuses until it is fixed
-or the box is unticked. Structure models are unaffected, since their resistors are the
-structure's loss and always carry their thermal noise.</p></li>
+or the box is unticked. Structure models need no option: their resistors are the
+structure's loss, and an RLC network with noisy resistors already emits exactly its own
+kT(I&nbsp;&minus;&nbsp;S&nbsp;S<sup>H</sup>), so their noise is as complete as the loss the
+model contains.</p></li>
 <li><b>Fit range (GHz)</b> (both modes): the band of the loaded file the model is fitted
 to, as two plain numbers in GHz (the unit is in the label, so there is nothing to type but
 the number). Loading a file puts its own span in the fields, so they always name the band
