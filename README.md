@@ -239,7 +239,7 @@ A universal model cannot take that noise from its own resistors, which place the
 - N resistors of 0.25 ohm, one per port, are its only noise sources (`Rnz_e1` to `Rnz_eN`), since 4kTR = kT is the noise power a matched port emits. They drive a copy of the model's state dynamics (`Cnz_x*` and controlled sources `Gnz_*`), which injects the noise waves into each port's internal sensor node.
 - Nothing feeds back into the fitted network, so its S-parameters, its DC operating point and everything else the conversion reports stay exactly what they are without the option.
 - The noise follows the simulator temperature like any resistor's, while the S-parameters do not change with it.
-- In a noise analysis the block's share is the sum of its `Rnz_e*` entries. It works in every analysis that handles resistor noise, for example `noise` in Ngspice and VACASK, and VACASK's `hbnoise`, `pnoise` and transient noise.
+- In a noise analysis the block's share is the sum of its `Rnz_e*` entries. Both dialects carry the generator, the simulators differ in which analyses see it. VACASK sees it in `noise`, `hbnoise`, `pnoise` and transient noise (`noisemode="sde"`). Ngspice sees it in `.noise` only, since it has no periodic noise analysis and adds no resistor noise to a transient run, so a mixer's noise figure through a fitted passive is a VACASK job.
 - The netlist grows by about 2N + 3 lines per state, where a model has N times its model order states: a 3-port at order 6 gains 113 lines, a 7-port at order 23 goes from 1892 to 4659.
 
 **It needs a strictly passive model.** The generator exists only where sigma_max stays below 1 at every frequency, far outside the data included, so keep *Enforce passivity* ticked at a ceiling of `1.00`. When the model still is not strictly passive (a raised ceiling, enforcement off, or a fit enforcement cannot fix), no noise is added and the message names the model's sigma_max. The GUI still shows the model and its plots, its Result panel reads *NOT added*, and Export refuses. The CLI writes no file and exits non-zero. A noiseless netlist under a name you asked to be noisy would otherwise enter a noise budget unnoticed.
@@ -253,11 +253,13 @@ Every generator is checked before it is added: V V<sup>H</sup> = I - S S<sup>H</
 | `blc_ihp-sg13g2.s4p`, order 6 | 4, 24 | 3.5e-7 | 9.4e-7 |
 | a 7-port receiver core, order 23 | 7, 161 | 3.6e-7 | 9.4e-7 |
 
-The numbers are the largest relative deviation from 1 GHz to 10 THz, on every port and on the difference of ports 1 and 2, which tests the correlation. Both are constant offsets set by each simulator's physical constants, the same a plain resistor shows. VACASK transient noise (`noisemode="sde"`) through the WPD generator matches VACASK's own `noise` analysis within 3.4 % over 5 GHz to 2 THz, and plain resistor noise through the same fitted model within 2.5 %, both the scatter of a single 40 ns record.
+The numbers are the largest relative deviation from 1 GHz to 10 THz, on every port and on the difference of ports 1 and 2, which tests the correlation. Both are constant offsets set by each simulator's physical constants, the same a plain resistor shows. VACASK transient noise (`noisemode="sde"`) through the WPD generator matches VACASK's own `noise` analysis within 3.4 % over 5 GHz to 2 THz, and plain resistor noise through the same fitted model within 2.5 %, both the scatter of a single 40 ns record. `tests/test_noise.py` keeps the netlist honest without a simulator: it solves the emitted circuit with its own AC noise analysis and checks every port and every correlation against the same formula.
+
+How much the noise matters depends on where the passive sits. In front of the first gain stage it adds roughly its loss in dB to the noise figure. Behind a stage with a high noise figure it hardly counts: in a six-port receiver whose detectors have a 42 dB noise figure, the core with 6 dB to 10 dB of loss adds 0.0001 dB.
 
 The noise is only as good as the loss in the S-parameter data. An EM solve whose mesh has not converged carries its loss error straight into the noise, and on a low-loss block a small fit error is a large share of 1 - |S<sub>21</sub>|<sup>2</sup>.
 
-Structure models are unaffected: their resistors are the structure's loss and always carry their thermal noise.
+Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
 
 ### Watching a conversion
 
