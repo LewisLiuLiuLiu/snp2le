@@ -141,6 +141,71 @@ def test_structure_resistors_keep_their_noise(two_port, center_tap):
         assert "noisy=0" not in res.ngspice and "noisy=0" not in res.vacask
 
 
+def _port_noise(ir, f, z0=50.0):
+    """Port-voltage noise covariance per kT of an R/L/C IR with coupled inductors, every
+    resistor a noise source of 4kT/R and the ports terminated in noiseless z0, and the
+    S-matrix of the same circuit."""
+    from snp2le.core import mna
+    nodes = sorted({n for e in ir.elements for n in e.nodes if n != "0"} | set(ir.ports))
+    ni = {n: i for i, n in enumerate(nodes)}
+    w = 2 * np.pi * f
+    Y = np.zeros((len(nodes), len(nodes)), complex)
+
+    def stamp(ai, bi, aj, bj, y):
+        for r, sr in ((ni.get(ai), 1), (ni.get(bi), -1)):
+            for c, sc in ((ni.get(aj), 1), (ni.get(bj), -1)):
+                if r is not None and c is not None:
+                    Y[r, c] += sr * sc * y
+
+    groups, coupled = mna._coupled_groups(ir)
+    for e in ir.elements:
+        a, b = e.nodes
+        if e.kind == "R":
+            stamp(a, b, a, b, 1 / e.value)
+        elif e.kind == "C":
+            stamp(a, b, a, b, 1j * w * e.value)
+        elif e.kind == "L" and e.name not in coupled:
+            stamp(a, b, a, b, 1 / (1j * w * e.value))
+    for gamma, branch in groups:
+        for i, (ai, bi) in enumerate(branch):
+            for j, (aj, bj) in enumerate(branch):
+                stamp(ai, bi, aj, bj, gamma[i, j] / (1j * w))
+    for p in ir.ports:
+        stamp(p, "0", p, "0", 1 / z0)
+    P = [ni[p] for p in ir.ports]
+    cov = np.zeros((len(P), len(P)), complex)
+    for e in (e for e in ir.elements if e.kind == "R"):     # unit current from a to b
+        J = np.zeros(len(nodes), complex)
+        for n, s in ((e.nodes[0], -1), (e.nodes[1], 1)):
+            if n in ni:
+                J[ni[n]] += s
+        h = np.linalg.solve(Y, J)[P]
+        cov += 4 / e.value * np.outer(h, h.conj())
+    S = np.zeros((len(P), len(P)), complex)
+    for j, pj in enumerate(P):                     # Norton source of an incident wave of 1
+        J = np.zeros(len(nodes), complex)
+        J[pj] = 2 / np.sqrt(z0)
+        a = np.zeros(len(P))
+        a[j] = 1
+        S[:, j] = np.linalg.solve(Y, J)[P] / np.sqrt(z0) - a
+    return cov, S
+
+
+@pytest.mark.parametrize("which, kw", [("two_port", None),
+                                       ("two_port", dict(substrate="symmetric+coupling")),
+                                       ("center_tap", None)])
+def test_the_resistors_carry_exactly_the_noise_of_the_loss(which, kw, request):
+    """Twiss's theorem, the reason structure models need no thermal-noise option: an RLC
+    network with noisy resistors and coupled inductors emits exactly kT (I - S S^H) of its
+    own S-parameters.  Below, inside and above the data."""
+    res = (request.getfixturevalue(which) if kw is None
+           else _convert(IND, "inductor-wideband", **kw))
+    assert res.ok and (kw is None or "Rsub12" in res.ngspice)
+    for f in (1e8, 1e9, 2e10, 6e10, 3e11):
+        cov, S = _port_noise(res.ir, f)
+        assert np.max(np.abs(cov - 50 * (np.eye(len(S)) - S @ S.conj().T))) < 1e-12 * 50, f
+
+
 def test_basic_has_the_fixed_topology():
     """1 segment, 1 skin section, no substrate coupling: the same elements for any data."""
     res = _convert(IND, "inductor-wideband", basic_model=True)

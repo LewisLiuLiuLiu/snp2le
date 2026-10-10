@@ -261,7 +261,7 @@ How much the noise matters depends on where the passive sits. In front of the fi
 
 The noise is only as good as the loss in the S-parameter data. An EM solve whose mesh has not converged carries its loss error straight into the noise, and on a low-loss block a small fit error is a large share of 1 - |S<sub>21</sub>|<sup>2</sup>.
 
-Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
+Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT, and by `tests/test_inductor_wideband.py` on both wideband inductors, coupled half coils included, to better than 1e-12 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
 
 ### Watching a conversion
 
