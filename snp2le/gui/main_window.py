@@ -141,6 +141,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.state.f_extract = v["f_extract"]
         self.state.n_segments = v["n_segments"]
         self.state.iso_resistor = v["iso_resistor"]
+        self.state.basic_model = v["basic_model"]
+        for name in ("coil_segments", "substrate", "peak_q_weight", "shunt_accuracy",
+                     "center_tap"):
+            setattr(self.state, name, v[name])
         self.state.max_order = v["max_order"]
         self.state.enforce_passivity = v["enforce_passivity"]
         self.state.passivity_ceiling = v["passivity_ceiling"]

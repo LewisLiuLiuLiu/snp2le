@@ -21,7 +21,8 @@ from .progress import StageTracker
 from . import netlist as _nl
 from . import universal as _uni
 from . import mna as _mna
-from .structures import get_structure
+from .structures import STRUCTURES, get_structure
+from .structures.inductor_wideband import wideband_options
 
 # (key, relative cost, message).  Universal mode is dominated by the fit itself,
 # structure mode by the MNA rebuild of the extracted RLC over every frequency.
@@ -50,12 +51,26 @@ _PLAN_STRUCTURE = (
     ("traces",   5, "building the extra traces"),
     ("netlist",  5, "rendering the netlists"),
 )
+# A wideband structure (the fitted inductors) spends nearly all its time in the global fit,
+# which reports its own progress per least-squares run.  It has no per-element tolerance.
+_PLAN_STRUCTURE_WIDEBAND = (
+    ("prepare",  1, "preparing the data"),
+    ("extract", 92, "fitting the wideband model"),
+    ("model",    5, "rebuilding the model response"),
+    ("traces",   1, "building the extra traces"),
+    ("netlist",  1, "rendering the netlists"),
+)
+
+
+def _is_wideband(key) -> bool:
+    return bool(getattr(STRUCTURES.get(key), "wideband", False))
 
 
 def convert(state, net, progress=None) -> Results:
     res = Results(mode=state.mode)
+    wideband = state.mode == "structure" and _is_wideband(state.structure_key)
     if state.mode == "structure":
-        plan = _PLAN_STRUCTURE
+        plan = _PLAN_STRUCTURE_WIDEBAND if wideband else _PLAN_STRUCTURE
     else:
         plan = _PLAN_UNIVERSAL_NOISE if state.thermal_noise else _PLAN_UNIVERSAL
     track = StageTracker(progress, plan)
@@ -68,6 +83,7 @@ def convert(state, net, progress=None) -> Results:
     track.enter("prepare")
     net = _io.without_dc(net)            # a 0 Hz sample breaks the extraction math
     n_file = len(net.f)
+    f_file_lo = float(net.f[0]) if n_file else 0.0
     try:                                 # optional sub-band: fit only what the user asked for
         net, band_notes = _io.restrict_band(net, state.f_min, state.f_max)
     except (TypeError, ValueError) as exc:     # invalid band, or a non-number from a design
@@ -90,6 +106,10 @@ def convert(state, net, progress=None) -> Results:
         res.error = str(exc)
         return res
 
+    if wideband and len(net.f) and net.f[0] > f_file_lo:
+        # the low end is what pins Rdc and the DC inductance, a fit without it guesses them
+        res.messages.append("the fit range starts above the file's first frequency, so the "
+                            "DC resistance and inductance are extrapolated, not fitted")
     res.messages = list(band_notes) + list(res.messages)   # the band first, it frames the rest
     track.enter("netlist")
     res.ngspice = _nl.render_ngspice(res.ir)
@@ -146,10 +166,17 @@ def _convert_structure(state, net, res, track):
     from .units import format_eng
     track.enter("extract")
     struct = get_structure(state.structure_key)
-    ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
-                                       state.iso_resistor)
+    if struct.wideband:                       # fitted over the band, f_ext does not apply
+        ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
+                                           state.iso_resistor, progress=track.sub("extract"),
+                                           **wideband_options(state))
+        res.messages.extend(metrics.pop("messages", ()))
+    else:
+        ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
+                                           state.iso_resistor)
     pos = net.f[net.f > 0]
-    if pos.size and (state.f_extract < pos[0] or state.f_extract > pos[-1]):
+    if (not struct.wideband and pos.size
+            and (state.f_extract < pos[0] or state.f_extract > pos[-1])):
         where = "the fit range" if res.band_limited else "the data"
         res.messages.append(
             f"ext. frequency {format_eng(state.f_extract, 'Hz')} outside {where}; "
@@ -180,8 +207,12 @@ def _convert_structure(state, net, res, track):
     # optional extra frequency-domain traces (e.g. inductor L/Q) and plot defaults
     track.enter("traces")
     try:
-        res.aux_traces = struct.freq_traces(net, res.model_s) or {}
-        res.default_plots = struct.default_plots()
+        if struct.wideband:                   # its views follow the fitted port order
+            res.aux_traces = struct.freq_traces(net, res.model_s, ir=ir) or {}
+            res.default_plots = struct.default_plots(ir=ir)
+        else:
+            res.aux_traces = struct.freq_traces(net, res.model_s) or {}
+            res.default_plots = struct.default_plots()
     except Exception as exc:                          # noqa: BLE001
         res.messages.append(f"freq traces failed: {exc}")
     res.passive = True                                # passive RLC by construction

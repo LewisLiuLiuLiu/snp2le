@@ -33,14 +33,27 @@ be read is reported and the example is loaded instead.</li>
 <li><b>Structure</b> (structure mode): the physical model to fit. Models whose port count
 does not match the loaded file are greyed out:
   <ul>
-  <li><b>Inductor</b>, <b>MIM capacitor</b> (also use this for MOM caps),
-  <b>Tline (RLGC)</b> (2-port)</li>
-  <li><b>Wilkinson (in-phase)</b>, <b>Wilkinson (quadrature)</b> (3-port)</li>
+  <li><b>Inductor</b>, <b>Inductor (wideband)</b>, <b>MIM capacitor</b> (also use this
+  for MOM caps), <b>Tline (RLGC)</b> (2-port)</li>
+  <li><b>Wilkinson (in-phase)</b>, <b>Wilkinson (quadrature)</b>,
+  <b>Inductor (center tap)</b> (3-port)</li>
   <li><b>Balun (transformer)</b>, <b>Branch-line coupler</b> (4-port)</li>
-  </ul></li>
+  </ul>
+  The two wideband inductors are fitted over the whole band instead of read off at one
+  frequency: series R<sub>s</sub>, L<sub>s</sub> and two skin sections
+  R<sub>skin</sub>&nbsp;||&nbsp;L<sub>skin</sub>, C<sub>s</sub> across the coil and a
+  C<sub>ox</sub>&nbsp;&ndash;&nbsp;(R<sub>si</sub>&nbsp;||&nbsp;C<sub>si</sub>) substrate
+  network at each port. The fit uses the data up to 1.2&nbsp;x the self-resonance
+  frequency, splits an electrically long coil into up to 3 segments, and keeps the model
+  symmetric where the data is. <b>Inductor (center tap)</b> couples its two half coils with
+  k and finds the center tap itself (the port in the middle of the coil), the Conversion
+  panel names it. A fit takes a few seconds (up to about 15&nbsp;s for the center tap).
+  Keep the low-frequency data in the fit range: it pins down the DC resistance and
+  inductance.</li>
 <li><b>f<sub>ext</sub></b> (structure mode): the single frequency at which the lumped
 values are read off the data. Accepts engineering notation (e.g. <i>7&nbsp;GHz</i>). If
-it is outside the data it falls back to the device's natural design point.</li>
+it is outside the data it falls back to the device's natural design point. The wideband
+inductors have no extraction frequency and show their own options in its place (below).</li>
 <li><b>Max order</b> (universal mode): the largest model order the vector fit may use,
 counted as n<sub>real</sub> + 2 x n<sub>complex</sub>, which is also the number of internal
 states in the netlist. A higher order tracks sharp resonances but enlarges the netlist. The
@@ -122,6 +135,27 @@ shows the band actually fitted, highlighted while it is a sub-band.</li>
   coupler's arms (one arm Q matched to the device's loss), lifting its otherwise ideal
   reflection and isolation terms toward the measured values.</li>
   </ul></li>
+<li><b>Wideband inductor options</b> (in place of f<sub>ext</sub> for the two wideband
+inductors):
+  <ul>
+  <li><b>Basic model</b>: a fixed topology, 1 coil segment, 1 skin section and no
+  substrate coupling, so every fit has the same elements (e.g. for data tables). Untick to
+  let the fit add what the data needs.</li>
+  <li><b>Segments</b> (2-port): <i>auto</i> lets the fit pick the fewest of 1, 2 and 3
+  segments within 10&nbsp;% of the best, a number fixes it. <b>Basic model</b> fixes it
+  at 1.</li>
+  <li><b>Center tap</b> (center-tapped inductor): <i>auto</i> takes the port the data puts
+  in the middle of the coil, a number sets it. The netlist keeps the file's port order
+  either way.</li>
+  <li><b>Peak-Q weight</b>: weights L and Q up to 3x where the data's Q is at least
+  0.8&nbsp;x its peak, e.g. for a VCO tank, at a little more error elsewhere.</li>
+  <li><b>Measured data</b>: for measured or FDTD data, tolerates substrate errors below
+  0.01&nbsp;x the series branch, so noise at low frequency cannot pull the substrate values
+  off. Clean EM data does not need it.</li>
+  </ul>
+  The CLI also takes other weights, up to 10 segments and a fixed substrate network
+  (<tt>--peak-q-weight</tt>, <tt>--shunt-accuracy</tt>, <tt>--segments</tt>,
+  <tt>--substrate</tt>, <tt>--ct-port</tt>).</li>
 <li><b>View</b>: the two-segment switch at the right of the title bar, holding
 <i>Design&nbsp;&amp;&nbsp;Schematic</i> and <i>Plot</i> side by side. The view you are on
 is the filled one, and one click moves to the other. It follows the plots too: popping
@@ -156,7 +190,8 @@ running.</li>
 <ul>
 <li><b>Result</b>: fit/extraction quality. RMS error against the data, passivity,
 &sigma;<sub>max</sub> against the ceiling it was judged against (green below the
-ceiling, red above it), the model order (universal) or the extraction frequency (structure),
+ceiling, red above it), the model order (universal), the extraction frequency (structure)
+or the top of the fitted band (wideband inductors),
 and the <i>noise</i> the netlist carries: <i>noiseless (ideal)</i>, <i>thermal</i> (green) when
 <b>Thermal noise</b> added the generator, <i>NOT added</i> (red) when the model could not
 carry it, or <i>thermal (resistors)</i> for a structure model.
@@ -176,7 +211,8 @@ the order or enable passivity, before you hand the netlist to a simulator.</li>
 C, k, M) for a physical model, or a summary of the synthesised network for the
 universal macromodel. The schematic draws component <i>names</i> only. The numeric values
 live here.</li>
-<li><b>Tolerances</b> (structure models): the per-element agreement at the extraction
+<li><b>Tolerances</b> (structure models with an extraction frequency, so not the wideband
+inductors): the per-element agreement at the extraction
 frequency, |data&nbsp;&minus;&nbsp;model|&nbsp;/&nbsp;model in&nbsp;%. Directly-read
 reciprocal terms (a series L, R) read about 0&nbsp;%, because the model reproduces them
 exactly. Terms the model can only approximate (e.g. a shunt C forced symmetric across two

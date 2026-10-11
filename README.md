@@ -28,7 +28,7 @@ Institute for Integrated Circuits and Quantum Computing (IICQC), Johannes Kepler
 It offers two conversion philosophies:
 
 - **Universal (any N-port).** Vector-fits the S-parameters with [scikit-rf](https://scikit-rf.org) `VectorFitting`, optionally enforces passivity, and synthesises a passive macromodel of R, C and controlled sources. It works for any structure and port count, and is electrically exact but not physically interpretable. Its resistors are emitted noiseless (`noisy=0`, understood by both Ngspice and VACASK): they exist to reproduce the fitted response, not to model a device, and charging thermal noise against them would report noise that tracks the fit order instead of the structure. So by default the model is noiseless (ideal), and the **Thermal noise** option adds the noise the lossy passive really has, kT(I - S S<sup>H</sup>) at its ports, as a generator computed from the fit. See [Thermal noise](https://github.com/iic-jku/snp2le#thermal-noise).
-- **Structure-specific.** Fits a known physical topology, so every component maps to reality (series L, shunt C, coupling k, and so on) at a chosen **extraction frequency**. Its resistors model real loss (a Wilkinson's isolation resistor, a coil's conductor loss), so they keep their thermal noise. See [Available structures](https://github.com/iic-jku/snp2le#available-structures).
+- **Structure-specific.** Fits a known physical topology, so every component maps to reality (series L, shunt C, coupling k, and so on) at a chosen **extraction frequency**. The two wideband inductor models are the exception: they are fitted over the whole band, up to past the self-resonance, and also handle a center-tapped coil. Its resistors model real loss (a Wilkinson's isolation resistor, a coil's conductor loss), so they keep their thermal noise. See [Available structures](https://github.com/iic-jku/snp2le#available-structures).
 
 Either mode fits the file's full frequency range by default, or a **fit range** of your choosing (e.g. only 110 GHz to 170 GHz of a 80 GHz to 240 GHz EM sweep), so the model order is spent on the band the block actually operates in.
 
@@ -66,7 +66,9 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  │  │  ├─ base.py
 │  │  │  ├─ balun.py
 │  │  │  ├─ branchline.py
+│  │  │  ├─ inductor_fit.py   wideband inductor fit (2-port and center tap)
 │  │  │  ├─ inductor_pi.py
+│  │  │  ├─ inductor_wideband.py
 │  │  │  ├─ mim_cap.py
 │  │  │  ├─ tline.py
 │  │  │  └─ wilkinson.py
@@ -179,7 +181,7 @@ Naming a `.sNp` file on the command line opens the GUI on it instead of the exam
 ### Typical workflow
 
 1. **Load** a Touchstone `.sNp` file from the top bar, or name it on the command line (`snp2le design.s4p`, see above). The header shows the port count and frequency range.
-2. **Choose a mode.** Universal (set *Max order*, *Enforce passivity* and the *Passivity ceiling* it works towards, and tick *Thermal noise* for a model that carries the passive's noise) or Structure-specific (pick a structure and set the *extraction frequency*). Some structures expose an extra option such as *Stages*, *Isolation R* or *Resistive loss*. *Max order* bounds the model order, `n_real + 2 x n_complex`, which is also the number of internal states in the netlist. The *Result* panel's *order* line reports the order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair counts once, so the two numbers differ by design.
+2. **Choose a mode.** Universal (set *Max order*, *Enforce passivity* and the *Passivity ceiling* it works towards, and tick *Thermal noise* for a model that carries the passive's noise) or Structure-specific (pick a structure and set the *extraction frequency*). Some structures expose an extra option such as *Stages*, *Isolation R* or *Resistive loss*. The wideband inductors have no extraction frequency and show their own options instead: *Basic model*, *Segments* (*Center tap* for the center-tapped one), *Peak-Q weight* and *Measured data*. *Max order* bounds the model order, `n_real + 2 x n_complex`, which is also the number of internal states in the netlist. The *Result* panel's *order* line reports the order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair counts once, so the two numbers differ by design.
 3. **Restrict the fit range** (optional, both modes). The *Fit range (GHz)* fields start at the loaded file's own span, so they always name the band being fitted. Enter two plain numbers in GHz (e.g. `110` and `170`) to fit only a sub-band. The *Result* panel shows the band actually fitted, and the RMS error, the tolerances, the plots and a testbench run's sweep all follow it. An edge outside the data is clamped to the data and reported, an empty or inverted band is refused.
 4. **Inspect** the result, element values, per-element **tolerances** at the extraction frequency, the drawn schematic, and the generated netlist in the **Design & Schematic** view.
 5. **Compare** the loaded data (grey) against the extracted model (blue) in the **Plot** view (up to four traces, magnitude and phase). The **View** switch at the right of the title bar carries both views side by side and fills the one you are on, so a click moves between them.
@@ -259,7 +261,7 @@ How much the noise matters depends on where the passive sits. In front of the fi
 
 The noise is only as good as the loss in the S-parameter data. An EM solve whose mesh has not converged carries its loss error straight into the noise, and on a low-loss block a small fit error is a large share of 1 - |S<sub>21</sub>|<sup>2</sup>.
 
-Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
+Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT, and by `tests/test_inductor_wideband.py` on both wideband inductors, coupled half coils included, to better than 1e-12 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
 
 ### Watching a conversion
 
@@ -363,6 +365,12 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--fmax FREQ` | both | highest frequency used for the fit (default: the file's last point) |
 | `--stages N` | structure | RLGC ladder cells (transmission line) |
 | `--iso-r` / `--no-iso-r` | structure | Wilkinson isolation R or branch-line arm loss |
+| `--basic` | structure | fixed basic topology for the wideband inductors: 1 coil segment, 1 skin section, no substrate coupling |
+| `--segments N` | structure | wideband inductors: fixed coil segment count, 1 to 10, per half for `inductor-ct` (default: the fit picks the fewest of 1 to 3 within 10 % of the best) |
+| `--substrate VARIANT` | structure | wideband inductors: `auto`, `symmetric`, `asymmetric`, `symmetric+coupling` or `asymmetric+coupling` (`inductor-ct`: no coupling) |
+| `--peak-q-weight [A]` | structure | wideband inductors: weight L and Q up to 1+A times near the Q peak (A = 2 without a value) |
+| `--shunt-accuracy [K]` | structure | wideband inductors: measure substrate errors against at least K x the series branch, for measured or FDTD data (K = 0.01 without a value) |
+| `--ct-port {1,2,3}` | structure | `inductor-ct`: center tap port (default: detected from the data) |
 | `--format ngspice\|vacask\|both` | both | output dialect(s). VACASK writes `.inc` |
 | `-o, --output PATH` | both | output path (single input), names the `.SUBCKT` |
 | `--values` | both | print the element values (extracted, or the synthesised network's) |
@@ -384,6 +392,18 @@ snp2le -b convert coupler.s4p --mode universal --order 12 -o coupler.spice
 # structure extraction at 7 GHz, both dialects, print values and tolerances
 snp2le -b convert ind.s2p --mode structure --structure inductor-pi \
     --fext 7GHz --format both --values --tolerances
+
+# wideband inductor model, fitted from DC to past the self-resonance (no --fext)
+snp2le -b convert snp2le/examples/ind_500pH_ihp-sg13cmos5l.s2p \
+    --mode structure --structure inductor-wideband --format both --values
+
+# center-tapped inductor, center tap detected from the data
+snp2le -b convert snp2le/examples/ind_ct_n2_d82_w4_s4_ihp-sg13g2.s3p \
+    --mode structure --structure inductor-ct --values
+
+# measured inductor: tolerate substrate noise, weight Q around its peak, 2 segments
+snp2le -b convert meas.s2p --mode structure --structure inductor-wideband \
+    --segments 2 --peak-q-weight --shunt-accuracy
 
 # fit only the 110 to 170 GHz sub-band of a wider EM sweep
 snp2le -b convert core.s7p --mode universal --order 24 --fmin 110GHz --fmax 170GHz
@@ -409,6 +429,8 @@ snp2le -b convert snp2le/examples/bpf_ihp-sg13g2.s2p \
 | Key | Model | Ports | Notes |
 | --- | --- | --- | --- |
 | `inductor-pi` | Inductor | 2 | series R-L plus shunt C/R per port |
+| `inductor-wideband` | Inductor (wideband) | 2 | fitted over the whole band, no f_ext, see below |
+| `inductor-ct` | Inductor (center tap) | 3 | coupled half coils, center tap detected or `--ct-port`, no f_ext, see below |
 | `mim-cap` | MIM capacitor | 2 | series C with parasitic L/R plus shunt C (use it for MOM caps too) |
 | `tline-rlgc` | Tline (RLGC) | 2 | transmission line as an N-cell ladder of L-cells (`--stages`) |
 | `wilkinson-inphase` | Wilkinson (in-phase) | 3 | optional isolation resistor (`--iso-r`) |
@@ -417,6 +439,23 @@ snp2le -b convert snp2le/examples/bpf_ihp-sg13g2.s2p \
 | `branchline` | Branch-line coupler | 4 | optional fitted arm loss (`--iso-r`) |
 
 New structures plug in by subclassing `snp2le.core.structures.base.Structure` and registering them in `snp2le/core/structures/__init__.py`. They then appear in the GUI dropdown and the CLI automatically.
+
+### Wideband inductors
+
+`inductor-pi` reads its values off at one frequency, so it is exact there and drifts away from it. `inductor-wideband` and `inductor-ct` are fitted over the whole band instead, from the lowest frequency in the data up to 1.2 x the self-resonance frequency (SRF), and reproduce L, Q, the SRF and the S-parameters over that band. They port Volker Mühlhaus' [inductor_fit](https://github.com/VolkerMuehlhaus/lumpedmodel/tree/main/inductor_fit), whose README has the full theory of operation.
+
+- **Model.** A series branch of R<sub>s</sub>, L<sub>s</sub> and two skin sections R<sub>skin</sub> || L<sub>skin</sub> (frequency-dependent R and L from skin and proximity effect), C<sub>s</sub> across the coil, and a C<sub>ox</sub> - (R<sub>si</sub> || C<sub>si</sub>) substrate network at each port. A substrate coupling R<sub>sub12</sub> || C<sub>sub12</sub> is added only where the data needs it and it is physically plausible.
+- **Segments.** An electrically long coil (a mm-wave inductor simulated far past its SRF) behaves like a line, so the fit also tries 2 and 3 equal coil segments with the substrate network distributed along the coil, and keeps the fewest within 10 % of the best fit. The values table shows totals, the netlist one set of elements per segment. *Segments* (`--segments`) fixes the count instead, for the same topology across a sweep or a smaller netlist.
+- **Symmetry** is decided from the data: port 2 shares port 1's substrate values when the two shunt branches differ by less than 5 %. `--substrate` fixes the variant instead.
+- **Center tap.** `inductor-ct` fits a 3-port with two coil ends and the center tap: two half coils coupled with k, R<sub>ct</sub> to the center tap and a substrate network under it, with the inductances, resistances and substrate of the halves tied separately where the data is symmetric. The center tap is the port the data puts in the middle of the coil, where the two coil ends share the weakest transfer admittance, and the Conversion panel names it. *Center tap* (`--ct-port`) sets it instead. The netlist keeps the file's port order. k is the effective coupling including the center tap lead inductance, which terminal data cannot separate from M.
+- **Basic model** (`--basic`) fixes the topology at 1 segment, 1 skin section and no substrate coupling, so every fit has the same elements, e.g. for machine-learning data tables.
+- **Peak-Q weight** (`--peak-q-weight`, A = 2) weights L and Q up to 1+A times where the data's Q is at least 0.8 x its peak, e.g. for a VCO tank. On the 500 pH example it takes the basic model's Q error near the peak from 4.2 % to 1.6 %, at a little more error elsewhere.
+- **Measured data** (`--shunt-accuracy`, K = 0.01) is for measured or FDTD data. At low frequency the substrate branch is 1e-4 to 1e-3 of the series branch, so a small absolute error in the data swamps it. The option measures substrate errors against at least K x the series branch. On a synthetic coil with S noise of 1e-3 it brings C<sub>ox</sub> from 18 % to 29 % off back to within 6 %. Clean EM data (e.g. Palace) does not need it.
+- **Keep the low-frequency data.** It is what determines the DC resistance and inductance, so a *Fit range* that starts above the file's first point is reported as extrapolated.
+
+The GUI offers the two weights at their defaults and *Segments* from 1 to 3. Other weights, up to 10 segments and `--substrate` are CLI options.
+
+On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments and reproduces S21 to 0.55 % (RMS error over RMS data) and the peak Q11 of 15.3 at 21 GHz as 15.4 at 20.5 GHz. `inductor-pi` misses S21 by 4.4 % to 16 % over the same band, depending on f_ext (2 to 40 GHz). A universal fit at order 6 is closer still (0.009 %), but its elements are not a coil. A full fit takes about 3 s for a 2-port and 15 s for the bundled center-tapped coil, the basic model 1 s or less.
 
 
 ## Cite This Work
@@ -435,7 +474,7 @@ New structures plug in by subclassing `snp2le.core.structures.base.Structure` an
 
 ## Acknowledgements
 
-- The structure-specific extractors (inductor, MIM capacitor, RLGC line) were inspired by Volker Mühlhaus' [lumpedmodel](https://github.com/VolkerMuehlhaus/lumpedmodel).
+- The structure-specific extractors (inductor, MIM capacitor, RLGC line) were inspired by Volker Mühlhaus' [lumpedmodel](https://github.com/VolkerMuehlhaus/lumpedmodel). The wideband inductor models (`inductor-wideband`, `inductor-ct`) and the bundled `ind_ct_n2_d82_w4_s4_ihp-sg13g2.s3p` are his inductor_fit and its example, used under Apache-2.0 with his permission.
 - The passivity-enforcement strategy for the universal macromodel was adapted from the [COBRA project](https://github.com/DI-PASSIONATE/COBRA).
 - Vector fitting is provided by [scikit-rf](https://scikit-rf.org).
 
