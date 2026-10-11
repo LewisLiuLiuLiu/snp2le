@@ -12,8 +12,13 @@ An optional `progress` callable, `cb(fraction, message)`, is reported to along
 the way.  The weights below are the relative cost of each stage, measured on the
 bundled examples, and they are what makes the fraction track the real work
 instead of counting steps.  See `progress.py` for the contract.
+
+A conversion runs its linear algebra on one BLAS thread (`_one_blas_thread`).
 """
 from __future__ import annotations
+import os
+from contextlib import nullcontext
+
 import numpy as np
 
 from .state import Results
@@ -66,7 +71,34 @@ def _is_wideband(key) -> bool:
     return bool(getattr(STRUCTURES.get(key), "wideband", False))
 
 
+# An explicit thread count for the BLAS library wins over the limit below.
+_BLAS_THREAD_VARS = ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def _one_blas_thread():
+    """One BLAS thread for a conversion.  Its matrices are small, so a thread pool spends more
+    on synchronising than on arithmetic: a 7-port core at order 24 with thermal noise took
+    905 s with the default 14 threads and 2.2 s with one.  threadpoolctl limits the libraries
+    loaded in this process
+    and restores them afterwards, so a simulator started from the GUI or --simulate keeps its
+    own threads, which environment variables would not.  Without threadpoolctl, or with a
+    thread variable set by the user, nothing is limited."""
+    if any(os.environ.get(k) for k in _BLAS_THREAD_VARS):
+        return nullcontext()
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:                       # a --no-deps install: slower, not wrong
+        return nullcontext()
+    import scipy.linalg  # noqa: F401  scipy brings its own OpenBLAS, load it before limiting
+    return threadpool_limits(limits=1, user_api="blas")
+
+
 def convert(state, net, progress=None) -> Results:
+    with _one_blas_thread():
+        return _convert(state, net, progress)
+
+
+def _convert(state, net, progress=None) -> Results:
     res = Results(mode=state.mode)
     wideband = state.mode == "structure" and _is_wideband(state.structure_key)
     if state.mode == "structure":

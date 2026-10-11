@@ -107,6 +107,7 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │     │  └─ 📁 figures/       PNG figures written by the plot scripts
 │     └─ 📁 simulations/      generated netlists and raw output (not tracked)
 ├─ 📁 tests/                  pytest suite
+│  ├─ test_blas_threads.py    a conversion runs on one BLAS thread
 │  ├─ test_core.py
 │  ├─ test_gui_fit_progress.py  headless non-blocking-conversion regressions
 │  ├─ test_gui_fit_range.py   headless fit-range control
@@ -305,6 +306,8 @@ More details worth knowing:
 
 **Export** writes the conversion that finished, so it is disabled while one is
 running and never blocks the window to re-fit.
+
+A conversion runs its linear algebra on one thread of the BLAS library (through [threadpoolctl](https://github.com/joblib/threadpoolctl)). Its matrices are small, so a thread pool costs more than it saves: a 7-port receiver core at order 24 with thermal noise converts in 2.2 s instead of 15 minutes with the default 14 threads. Set `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` to choose the count yourself. A simulator started from snp2le keeps its own threads.
 
 ### Run a testbench (simulate)
 

@@ -33,6 +33,7 @@ dependencies = [
     "scipy>=1.10",
     "matplotlib>=3.7",
     "schemdraw>=0.18",
+    "threadpoolctl>=3.5",
 ]
 
 [project.optional-dependencies]
