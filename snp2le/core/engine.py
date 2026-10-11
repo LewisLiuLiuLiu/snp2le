@@ -186,7 +186,8 @@ def _convert_structure(state, net, res, track):
     res.physical = True
     res.metrics = metrics
     res.value_rows = _nl.clamp_rows(rows)
-    track.enter("tol")
+    if not struct.wideband:                   # no per-element tolerance, so no stage in its plan
+        track.enter("tol")
     try:                                      # per-element tolerance at f_ext
         drift = struct.value_drift(
             net, res.value_rows, metrics.get("f_extract", state.f_extract)) or {}

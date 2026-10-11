@@ -380,3 +380,57 @@ def test_the_inductors_lead_the_dropdown_and_the_defaults_did_not_move():
         1: None, 2: "inductor-pi", 3: "wilkinson-inphase", 4: "balun"}
     assert {k for k, s in STRUCTURES.items() if s.wideband} == {"inductor-wideband",
                                                                  "inductor-ct"}
+
+
+def test_a_lossy_coil_whose_skin_seed_exceeds_its_bound_still_fits():
+    """A 25 ohm, 40 nH coil from 1 MHz seeds L_skin = R_skin/(2 pi f_corner) above the 1 uH
+    bound, which least_squares refused as a start outside its bounds ("Initial guess is
+    outside of provided bounds").  Clipped into them like the global fit's starts, the fit
+    recovers the coil."""
+    p = dict(Rs=25.0, Ls=40e-9, Rskin1=7.5, Lskin1=2e-9, Rskin2=1.0, Lskin2=1e-30, Cs=30e-15,
+             Cox1=300e-15, Rsi1=500.0, Csi1=400e-15, Cox2=300e-15, Rsi2=500.0, Csi2=400e-15,
+             Rsub12=1e15, Csub12=1e-30)
+    f = np.geomspace(1e6, 5e9, 201)
+    S = skrf.network.y2s(fitmod.y_model(np.array([p[n] for n in fitmod.PARAM_NAMES]),
+                                        2 * np.pi * f, 1), z0=50)
+    net = skrf.Network(frequency=skrf.Frequency.from_f(f, unit="hz"), s=S, z0=50)
+    for basic in (True, False):
+        res = engine.convert(ConverterState(mode="structure", structure_key="inductor-wideband",
+                                            basic_model=basic), net)
+        assert res.ok, res.error
+        v = _values(res)
+        assert v["R_s"] == pytest.approx(25.0, rel=1e-3)
+        assert v["L_s"] == pytest.approx(40e-9, rel=1e-3)
+
+
+def test_the_messages_name_what_limits_the_fit():
+    """A fit range that ends below the self-resonance is named as the limit, not the SRF, and
+    a model with no self-resonance either says so instead of quoting an "n/a" SRF."""
+    res = _convert(IND, "inductor-wideband", basic_model=True, f_max=3e9)
+    assert not res.ok
+    assert "up to 3 GHz, the end of the data or fit range" in res.error
+    res = _convert(IND, "inductor-wideband", basic_model=True, f_max=5e9)
+    assert res.ok and "no self-resonance in the data or in the model" in res.messages
+    assert not any("n/a" in m for m in res.messages)
+
+
+def test_a_wideband_conversion_never_reports_a_blank_stage():
+    """The engine's tolerance stage is not in the wideband plan, entering it reported an
+    empty message near the end of every fit."""
+    trace = []
+    res = engine.convert(ConverterState(mode="structure", structure_key="inductor-wideband",
+                                        basic_model=True), _net(IND),
+                         progress=lambda frac, msg: trace.append((frac, msg)))
+    assert res.ok and trace
+    assert all(msg for _frac, msg in trace), [t for t in trace if not t[1]]
+
+
+def test_a_capacitor_is_refused_with_a_reason():
+    """The MOM capacitor is capacitive at every point, so there is no coil to fit.  It used to
+    fail with scipy's own "Initial guess is outside of provided bounds"."""
+    for basic in (False, True):
+        res = _convert("mom_cap_74fF_02_ihp-sg13cmos5l.s2p", "inductor-wideband",
+                       basic_model=basic)
+        assert not res.ok
+        assert res.error == ("the input is not inductive anywhere in the fit band, this does "
+                             "not look like an on-chip inductor")
