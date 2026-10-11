@@ -459,7 +459,7 @@ New structures plug in by subclassing `snp2le.core.structures.base.Structure` an
 
 The GUI offers the two weights at their defaults and *Segments* from 1 to 3. Other weights, up to 10 segments and `--substrate` are CLI options.
 
-On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments and reproduces S21 to 0.55 % (RMS error over RMS data) and the peak Q11 of 15.3 at 21 GHz as 15.4 at 20.5 GHz. `inductor-pi` misses S21 by 4.3 % to 16 % over the same band, depending on f_ext (2 to 40 GHz). A universal fit at order 6 is closer still (0.009 %), but its elements are not a coil and it is not passive (sigma_max 2.18 at 500 THz, far above the data, so it cannot carry thermal noise). A full fit takes about 3 s for a 2-port and 15 s for the bundled center-tapped coil, the basic model 1 s or less.
+On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments and reproduces S21 to 0.55 % (RMS error over RMS data) and the peak Q11 of 15.3 at 21 GHz as 15.4 at 20.5 GHz. `inductor-pi` misses S21 by 4.3 % to 16 % over the same band, depending on f_ext (2 to 40 GHz). A universal fit at order 6 is closer still (0.009 %), but its elements are not a coil and it is not passive (sigma_max 2.18 at 500 THz, far above the data, so it cannot carry thermal noise). A full fit takes about 2 s for a 2-port and 6 s for the bundled center-tapped coil, the basic model under 1 s, and the center-tapped coil at `--segments 10` about 35 s.
 
 
 ## Cite This Work

@@ -47,7 +47,7 @@ does not match the loaded file are greyed out:
   frequency, splits an electrically long coil into up to 3 segments, and keeps the model
   symmetric where the data is. <b>Inductor (center tap)</b> couples its two half coils with
   k and finds the center tap itself (the port in the middle of the coil), the Conversion
-  panel names it. A fit takes a few seconds (up to about 15&nbsp;s for the center tap).
+  panel names it. A fit takes a few seconds (about 6&nbsp;s for the bundled center tap).
   Keep the low-frequency data in the fit range: it pins down the DC resistance and
   inductance.</li>
 <li><b>f<sub>ext</sub></b> (structure mode): the single frequency at which the lumped

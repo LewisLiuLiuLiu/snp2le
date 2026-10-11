@@ -56,6 +56,7 @@ SUBSTRATE_COST_TOLERANCE = 1.1  # simplest substrate variant within this factor 
 SYMMETRY_TOLERANCE = 0.05       # symmetric model if port/half responses differ by less (RMS)
 COX_SPAN = 0.5                  # Cox bound in decades around its low-frequency seed
 MIN_FIT_POINTS = 10
+GRID_CHUNK = 2000               # frequencies per model evaluation on the dense SRF grid
 
 # Substrate network variants (symmetric = port 2 tied to port 1, coupling = Rsub12||Csub12),
 # simple to complex.  With coupling the network is not always unique: a "shared substrate"
@@ -177,11 +178,20 @@ def _stamp(M, n1, n2, y):
 
 def _stamp_coupled(M, branches, Zb):
     """Magnetically coupled branches with impedance matrix Zb (N, b, b) between the node
-    pairs in `branches`, stamped as A inv(Zb) A^T with the incidence matrix A."""
-    A = np.zeros((M.shape[1], len(branches)))
-    for b, (n1, n2) in enumerate(branches):
-        A[n1, b], A[n2, b] = 1.0, -1.0
-    M += np.einsum("ib,fbc,jc->fij", A, np.linalg.inv(Zb), A)
+    pairs in `branches`, stamped as A inv(Zb) A^T with the incidence matrix A.  A holds 0
+    and +-1, so each inv(Zb) entry lands at the four node pairs of its branches.  Summed in
+    the order einsum("ib,fbc,jc->fij") used, it gives the same bits at a fraction of the
+    cost: the einsum visited every node and branch pair, 97 % of a 10-segment model."""
+    X = np.linalg.inv(Zb)
+    T = np.zeros_like(M)
+    for b, (n1b, n2b) in enumerate(branches):
+        for c, (n1c, n2c) in enumerate(branches):
+            x = X[:, b, c]
+            T[:, n1b, n1c] += x
+            T[:, n1b, n2c] -= x
+            T[:, n2b, n1c] -= x
+            T[:, n2b, n2c] += x
+    M += T
 
 
 def _kron_reduce(M, ports):
@@ -297,6 +307,14 @@ def y_diff(Y):
 def l_and_q(Yin, omega):
     Zin = 1.0 / Yin
     return Zin.imag / omega, Zin.imag / Zin.real
+
+
+def _on_grid(model, p, omega, segments):
+    """`model(p, omega, segments)` on the dense SRF grid, a chunk of frequencies at a time.
+    Every frequency is solved on its own, so the values are the same, but a 10-segment
+    center tap no longer holds 20000 nodal matrices of 43 x 43 at once (1.9 GB)."""
+    return np.concatenate([model(p, omega[i:i + GRID_CHUNK], segments)
+                           for i in range(0, len(omega), GRID_CHUNK)])
 
 
 def find_srf(f, Yin):
@@ -892,7 +910,7 @@ def fit_two_port(net, basic=False, segments=None, substrate="auto", peak_q_weigh
     model = model_quantities(p_fit, omega, segments)
     # model SRF on a dense grid past the data, so an extrapolated SRF is found as well
     f_grid = np.linspace(f[0], 1.5 * f[-1], 20000)
-    Y_grid = y_model(p_fit, 2 * math.pi * f_grid, segments)
+    Y_grid = _on_grid(y_model, p_fit, 2 * math.pi * f_grid, segments)
     srf_model = [find_srf(f_grid, Y_grid[:, 0, 0]), find_srf(f_grid, Y_grid[:, 1, 1])]
     SRF_model = min(x for x in srf_model if x is not None) if any(srf_model) else None
     below_srf = f <= (SRF_meas if SRF_meas is not None else f[-1])
@@ -1091,7 +1109,8 @@ def fit_center_tap(net, basic=False, segments=None, substrate="auto", peak_q_wei
     # ---- post-processing ----
     model = ct_quantities(y_model_ct(p_fit, omega, segments), omega)
     f_grid = np.linspace(f[0], 1.5 * f[-1], 20000)
-    grid = ct_quantities(y_model_ct(p_fit, 2 * math.pi * f_grid, segments), 2 * math.pi * f_grid)
+    grid = ct_quantities(_on_grid(y_model_ct, p_fit, 2 * math.pi * f_grid, segments),
+                         2 * math.pi * f_grid)
     SRF_model = {key: find_srf(f_grid, grid[yk]) for key, yk in srf_keys}
     below_srf = {key: f <= (srf if srf is not None else f[-1]) for key, srf in SRF_meas.items()}
     q_dd = (_peak_q(f, model["Qdd_gnd"], below_srf["dd_gnd"]),

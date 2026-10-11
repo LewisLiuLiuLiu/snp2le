@@ -6,7 +6,7 @@
 values below are the ones his script prints for the same files, so a change to the port
 that moves the fit shows up here first.  The second half checks what snp2le adds around
 the fit: the CircuitIR per coil segment, the coupled half coils, f_ext being ignored, the
-progress reports and the notes.  The full center-tapped fit takes about 15 s, so it runs
+progress reports and the notes.  The full center-tapped fit takes about 6 s, so it runs
 once per module.  Run with:  pytest -q
 """
 import os
@@ -453,3 +453,31 @@ def test_the_cli_says_what_a_wideband_structure_ignores(tmp_path, capsys):
     assert cli.main(["convert", os.path.join(EXAMPLES, IND_CT), "--mode", "structure",
                      "--structure", "inductor-ct", "--basic", "-o", out]) == 0
     assert "1 segment per half" in capsys.readouterr().out
+
+
+def test_the_coupled_stamp_and_the_chunked_grid_give_the_same_bits():
+    """The coupled half coils were stamped with einsum("ib,fbc,jc->fij"), which visited every
+    node and branch pair and took 97 % of a 10-segment center-tap model (288 s and 1.9 GB for
+    `--segments 10`).  The direct stamp must give the same bits, so no fit moves, and so must
+    the dense SRF grid evaluated in chunks."""
+    rng = np.random.default_rng(0)
+    for n in (1, 3, 10):
+        branches = [(b, b + 1) for b in range(2 * n)]
+        L = rng.normal(size=(2 * n, 2 * n))
+        w = rng.uniform(1e9, 1e11, 7)
+        Zb = 1j * w[:, None, None] * (L @ L.T + 2 * n * np.eye(2 * n)) * 1e-10 + np.eye(2 * n)
+        M = rng.normal(size=(7, 4 * n + 3, 4 * n + 3)) * (1 + 1j)
+        A = np.zeros((M.shape[1], len(branches)))
+        for b, (n1, n2) in enumerate(branches):
+            A[n1, b], A[n2, b] = 1.0, -1.0
+        ref = M + np.einsum("ib,fbc,jc->fij", A, np.linalg.inv(Zb), A)
+        fitmod._stamp_coupled(M, branches, Zb)
+        assert np.array_equal(M.view(np.uint64), ref.view(np.uint64)), n
+    def params(names):                     # 2 ohm, 0.1 nH, 10 fF and k = 0.4 throughout
+        return np.array([0.4 if name == "k" else 1e-10 if name[0] == "L"
+                         else 1e-14 if name[0] == "C" else 2.0 for name in names])
+    w = 2 * np.pi * np.linspace(1e7, 9e10, 2 * fitmod.GRID_CHUNK + 123)
+    for model, p in ((fitmod.y_model_ct, params(fitmod.CT_PARAM_NAMES)),
+                     (fitmod.y_model, params(fitmod.PARAM_NAMES))):
+        whole, chunked = model(p, w, 3), fitmod._on_grid(model, p, w, 3)
+        assert np.array_equal(whole.view(np.uint64), chunked.view(np.uint64))
