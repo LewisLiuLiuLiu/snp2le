@@ -5,7 +5,7 @@ Guidance for coding agents and contributors working in this repo (snp2le, a conv
 ## What this is
 
 - `snp2le` reads a Touchstone `.sNp` file and writes an equivalent lumped-element subcircuit in two dialects: Ngspice (`.spice`) and VACASK/Spectre (`.inc`).
-- Two modes: `universal` (scikit-rf vector fit with optional passivity enforcement, any port count) and `structure` (a known physical topology extracted at one frequency, one extractor per structure key).
+- Two modes: `universal` (scikit-rf vector fit with optional passivity enforcement, any port count) and `structure` (a known physical topology, one extractor per structure key, extracted at one frequency except the wideband inductors, which are fitted over the band).
 - `snp2le.core` is pure Python and Qt-free. `snp2le.gui` is a thin PySide6-Essentials layer. The GUI and the CLI both call the single entry point `engine.convert(state, net)` in `snp2le/core/engine.py`, which returns a `Results` dataclass from `snp2le/core/state.py`.
 - `README.md` is the user documentation. `doc/architecture.md` covers data flow, threading, internals and known limitations. Read the relevant part before changing behaviour.
 

@@ -111,11 +111,15 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  ├─ test_gui_fit_progress.py  headless non-blocking-conversion regressions
 │  ├─ test_gui_fit_range.py   headless fit-range control
 │  ├─ test_gui_launch_file.py  headless GUI opened on a command-line file
+│  ├─ test_gui_order_readout.py  headless order line in the Result panel
 │  ├─ test_gui_passivity_ceiling.py  headless passivity-ceiling control
+│  ├─ test_gui_plot_view.py   headless Plot view curves (tuple or list item data)
 │  ├─ test_gui_sim_flow.py    headless GUI run/poll/import regressions
 │  ├─ test_gui_thermal_noise.py  headless Thermal noise control
 │  ├─ test_gui_top_bar_layout.py  headless control-strip layout invariants
 │  ├─ test_gui_view_switch.py  headless View switch (both views on screen)
+│  ├─ test_gui_wideband_inductor.py  headless wideband inductor page
+│  ├─ test_inductor_wideband.py  the wideband inductor fit, netlist and noise
 │  ├─ test_main_dispatch.py   the entry point's argument dispatch (no Qt)
 │  ├─ test_noise.py           the thermal-noise generator against Bosma's formula
 │  ├─ test_progress.py        progress reporting and the fit watcher
@@ -242,7 +246,7 @@ A universal model cannot take that noise from its own resistors, which place the
 - Nothing feeds back into the fitted network, so its S-parameters, its DC operating point and everything else the conversion reports stay exactly what they are without the option.
 - The noise follows the simulator temperature like any resistor's, while the S-parameters do not change with it.
 - In a noise analysis the block's share is the sum of its `Rnz_e*` entries. Both dialects carry the generator, the simulators differ in which analyses see it. VACASK sees it in `noise`, `hbnoise`, `pnoise` and transient noise (`noisemode="sde"`). Ngspice sees it in `.noise` only, since it has no periodic noise analysis and adds no resistor noise to a transient run, so a mixer's noise figure through a fitted passive is a VACASK job.
-- The netlist grows by about 2N + 3 lines per state, where a model has N times its model order states: a 3-port at order 6 gains 113 lines, a 7-port at order 23 goes from 1892 to 4659.
+- The netlist grows by about 2N + 3 lines per state, where a model has N times its model order states: the bundled WPD at order 6 (fitted at model order 4, 12 states) gains 113 lines, a 7-port at order 23 goes from 1892 to 4659.
 
 **It needs a strictly passive model.** The generator exists only where sigma_max stays below 1 at every frequency, far outside the data included, so keep *Enforce passivity* ticked at a ceiling of `1.00`. When the model still is not strictly passive (a raised ceiling, enforcement off, or a fit enforcement cannot fix), no noise is added and the message names the model's sigma_max. The GUI still shows the model and its plots, its Result panel reads *NOT added*, and Export refuses. The CLI writes no file and exits non-zero. A noiseless netlist under a name you asked to be noisy would otherwise enter a noise budget unnoticed.
 
@@ -261,7 +265,7 @@ How much the noise matters depends on where the passive sits. In front of the fi
 
 The noise is only as good as the loss in the S-parameter data. An EM solve whose mesh has not converged carries its loss error straight into the noise, and on a low-loss block a small fit error is a large share of 1 - |S<sub>21</sub>|<sup>2</sup>.
 
-Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on all six structures to better than 1e-13 kT, and by `tests/test_inductor_wideband.py` on both wideband inductors, coupled half coils included, to better than 1e-12 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
+Structure models need no option. Their resistors are the structure's loss and always carry their thermal noise, and an RLC network with noisy resistors already emits exactly kT(I - S S<sup>H</sup>) of its own S-parameters (Twiss's theorem, checked on the seven extracted structures to about 1e-13 kT, and by `tests/test_inductor_wideband.py` on both wideband inductors, coupled half coils included, to better than 1e-12 kT), so a generator would count the noise twice. What a structure model can miss is loss it does not contain: the Wilkinson model's only resistor is the isolation resistor, so its through path is lossless and noiseless, and a branch-line coupler without *Resistive loss* is noiseless altogether.
 
 ### Watching a conversion
 
@@ -360,14 +364,14 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--passive` / `--no-passive` | universal | enforce passivity (default on) |
 | `--passivity-ceiling SIGMA` | universal | sigma_max the enforcement works towards, `1.0` to `1.2`, needs `--passive` (default `1.0`) |
 | `--thermal-noise` / `--no-thermal-noise` | universal | add the passive's thermal noise, kT(I - S S<sup>H</sup>) at the ports, or emit the noiseless model (default noiseless). A model that is not strictly passive cannot carry it: nothing is written and the exit code is non-zero |
-| `--fext FREQ` | structure | extraction frequency, e.g. `7GHz` |
+| `--fext FREQ` | structure | extraction frequency, e.g. `7GHz` (default 10 GHz). The wideband inductors have none |
 | `--fmin FREQ` | both | lowest frequency used for the fit (default: the file's first point) |
 | `--fmax FREQ` | both | highest frequency used for the fit (default: the file's last point) |
-| `--stages N` | structure | RLGC ladder cells (transmission line) |
+| `--stages N` | structure | RLGC ladder cells (transmission line), 1 to 10 |
 | `--iso-r` / `--no-iso-r` | structure | Wilkinson isolation R or branch-line arm loss |
 | `--basic` | structure | fixed basic topology for the wideband inductors: 1 coil segment, 1 skin section, no substrate coupling |
 | `--segments N` | structure | wideband inductors: fixed coil segment count, 1 to 10, per half for `inductor-ct` (default: the fit picks the fewest of 1 to 3 within 10 % of the best) |
-| `--substrate VARIANT` | structure | wideband inductors: `auto`, `symmetric`, `asymmetric`, `symmetric+coupling` or `asymmetric+coupling` (`inductor-ct`: no coupling) |
+| `--substrate VARIANT` | structure | wideband inductors: `auto`, `symmetric`, `asymmetric`, `symmetric+coupling` or `asymmetric+coupling` (`inductor-ct`: no coupling), default `auto` |
 | `--peak-q-weight [A]` | structure | wideband inductors: weight L and Q up to 1+A times near the Q peak (A = 2 without a value) |
 | `--shunt-accuracy [K]` | structure | wideband inductors: measure substrate errors against at least K x the series branch, for measured or FDTD data (K = 0.01 without a value) |
 | `--ct-port {1,2,3}` | structure | `inductor-ct`: center tap port (default: detected from the data) |
@@ -455,7 +459,7 @@ New structures plug in by subclassing `snp2le.core.structures.base.Structure` an
 
 The GUI offers the two weights at their defaults and *Segments* from 1 to 3. Other weights, up to 10 segments and `--substrate` are CLI options.
 
-On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments and reproduces S21 to 0.55 % (RMS error over RMS data) and the peak Q11 of 15.3 at 21 GHz as 15.4 at 20.5 GHz. `inductor-pi` misses S21 by 4.4 % to 16 % over the same band, depending on f_ext (2 to 40 GHz). A universal fit at order 6 is closer still (0.009 %), but its elements are not a coil. A full fit takes about 3 s for a 2-port and 15 s for the bundled center-tapped coil, the basic model 1 s or less.
+On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments and reproduces S21 to 0.55 % (RMS error over RMS data) and the peak Q11 of 15.3 at 21 GHz as 15.4 at 20.5 GHz. `inductor-pi` misses S21 by 4.3 % to 16 % over the same band, depending on f_ext (2 to 40 GHz). A universal fit at order 6 is closer still (0.009 %), but its elements are not a coil and it is not passive (sigma_max 2.18 at 500 THz, far above the data, so it cannot carry thermal noise). A full fit takes about 3 s for a 2-port and 15 s for the bundled center-tapped coil, the basic model 1 s or less.
 
 
 ## Cite This Work
