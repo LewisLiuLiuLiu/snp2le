@@ -438,6 +438,59 @@ def test_fit_range_survives_a_design_round_trip():
     assert ConverterState.from_json('{"mode": "universal"}').f_min is None
 
 
+def test_a_failed_conversion_leaves_no_output_from_an_earlier_run(tmp_path, capsys,
+                                                                  monkeypatch):
+    """A refused --thermal-noise used to leave the previous noiseless netlist in place,
+    which passes for the result (a Makefile takes it as up to date).  A failed input now
+    removes the files at its output paths and says so, except files the same run wrote, and
+    a successful run overwrites as before."""
+    import shutil
+    from snp2le import cli
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "snp2le", "examples", "wpd_ihp-sg13g2.s3p")
+    out = tmp_path / "wpd_le.spice"
+    for path in (out, tmp_path / "wpd_le.inc"):
+        path.write_text("* stale\n")
+    assert cli.main(["convert", src, "--order", "6", "--no-passive", "--thermal-noise",
+                     "--format", "both", "-o", str(out), "--quiet"]) == 1
+    assert not out.exists() and not (tmp_path / "wpd_le.inc").exists()
+    assert "removed" in capsys.readouterr().err
+    assert cli.main(["convert", src, "--order", "6", "--format", "both", "-o", str(out),
+                     "--quiet"]) == 0
+    assert "stale" not in out.read_text() and "removed" not in capsys.readouterr().err
+    # two inputs with one output name: the second fails, the first's netlist stays
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+    shutil.copy(src, tmp_path / "a" / "wpd.s3p")
+    (tmp_path / "b" / "wpd.s3p").write_text("not a touchstone file\n")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["convert", str(tmp_path / "a" / "wpd.s3p"),
+                     str(tmp_path / "b" / "wpd.s3p"), "--order", "6", "--quiet"]) == 1
+    assert (tmp_path / "wpd.spice").read_text().startswith("* wpd")
+    assert "removed" not in capsys.readouterr().err
+
+
+def test_a_hand_edited_design_reads_its_tick_boxes_as_written():
+    """bool("no") is True, so a design saying "thermal_noise": "no" used to tick the box.
+    Words, 0/1 and null now read as meant, anything else refuses to load with the field's
+    name (the GUI shows it in its Load failed dialog), and a saved design is unchanged."""
+    import json
+    import pytest
+    load = lambda **kw: ConverterState.from_json(json.dumps(kw))     # noqa: E731
+    assert load(thermal_noise="no").thermal_noise is False
+    assert load(thermal_noise=" Yes ").thermal_noise is True
+    assert load(enforce_passivity="false").enforce_passivity is False
+    assert load(iso_resistor=0).iso_resistor is False
+    assert load(basic_model=1).basic_model is True
+    assert load(enforce_passivity=None).enforce_passivity is True       # null: the default
+    for bad in ("maybe", 2, [], {}):
+        with pytest.raises(ValueError, match="thermal_noise must be true or false"):
+            load(thermal_noise=bad)
+    st = ConverterState(thermal_noise=True, enforce_passivity=False, basic_model=True,
+                        iso_resistor=False)
+    assert ConverterState.from_json(st.to_json()) == st
+
+
 def test_restrict_band_keeps_the_network_intact():
     """The cropped network is a real skrf Network, not a view: same ports and z0."""
     net = inductor_2port()

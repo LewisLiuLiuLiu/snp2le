@@ -124,6 +124,25 @@ def test_the_option_reaches_a_saved_design_and_back(win, top):
     assert not top.thermal_noise.isChecked()
 
 
+def test_a_hand_edited_design_loads_the_box_as_written(win, top, tmp_path, monkeypatch):
+    """"thermal_noise": "no" leaves the box unticked (bool("no") ticked it), and a value
+    that is neither true nor false is refused in the Load failed dialog, naming the field."""
+    path = tmp_path / "design.json"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(path), ""))
+    warned = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *a, **k: warned.append(a[2]))
+    top.thermal_noise.setChecked(True)
+    path.write_text('{"mode": "universal", "max_order": 6, "thermal_noise": "no"}')
+    win.on_load_design()
+    _settle(win)
+    assert not top.thermal_noise.isChecked() and not warned
+    path.write_text('{"mode": "universal", "thermal_noise": "maybe"}')
+    win.on_load_design()
+    assert warned and "thermal_noise must be true or false" in warned[0]
+
+
 def test_reset_unticks_it(win, top):
     top.thermal_noise.setChecked(True)
     top.reset_controls()

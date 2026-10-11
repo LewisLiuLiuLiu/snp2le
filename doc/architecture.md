@@ -183,7 +183,7 @@ pytest
   side (`noise.CHECK_TOL`, 1e-6 kT). A model that is not strictly passive, has a
   proportional term or fails the check gets no generator, `Results.noise.ok` is False
   with the reason, the engine adds that reason to `messages`, the GUI refuses Export
-  and the CLI writes nothing and exits non-zero. Its notes go into `CircuitIR.notes`,
+  and the CLI writes nothing and exits non-zero. Any failed CLI conversion also removes the files an earlier run left at its output paths (`cli._remove_stale`), except those the same run wrote, so a Makefile cannot take a stale netlist for the result. Its notes go into `CircuitIR.notes`,
   which the renderers print in full after the provenance comments. `_PLAN_UNIVERSAL_NOISE`
   carries the extra stage, so the default plan's progress fractions are unchanged.
   `tests/test_noise.py` solves the emitted circuit with its own AC noise analysis and
@@ -218,8 +218,8 @@ pytest
   M/segments^2 per cell pair. The rebuilt response matches the fit's own model function to
   1e-9 in S (`tests/test_inductor_wideband.py`). A value the fit puts below the netlist's floor is raised to it (`netlist._LIMITS`, 1 aF for a capacitor), which moves the netlist off the fit: the basic fit of `ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p` ends at its C_s bound of 0.1 aF, and the 1 aF in the netlist moves S by 2.1e-4, well inside the fit's own error. Its k is the effective coupling
   including the center tap lead inductance, which terminal data cannot separate from M.
-  A full fit takes 3 s (2-port) to 15 s (center tap) on the bundled examples, the basic
-  model 1 s or less. A values table longer than 12 rows is shown in two columns
+  A full fit takes 2 s (2-port) to 6 s (center tap) on the bundled examples, the basic
+  model under 1 s. The coupled half coils are stamped entry by entry (`inductor_fit._stamp_coupled`), in the summation order of the einsum over every node and branch pair it replaced, so the bits are the same while a 10-segment center-tap fit went from 605 s to 37 s on one machine. The dense SRF grid is evaluated in chunks of 2000 frequencies (`_on_grid`), which took that fit's peak memory from 1.9 GB to 0.34 GB. A values table longer than 12 rows is shown in two columns
   (`design_view._ONE_COLUMN_ROWS`).
 * inductor_fit's options are all ported: a fixed segment count (`coil_segments`, 1 to 10),
   a fixed substrate variant (`substrate`), the peak-Q weight A and the shunt accuracy K
