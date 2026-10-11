@@ -148,8 +148,10 @@ def _convert_universal(state, net, res, track):
     if state.thermal_noise:
         from . import noise as _noise
         track.enter("noise")
+        strict = (state.enforce_passivity and _uni.effective_ceiling(
+            state.enforce_passivity, state.passivity_ceiling) <= 1.0)
         res.noise = _noise.add_thermal_noise(res.ir, fit.vf, fit.sigma_max,
-                                             fit.sigma_max_freq)
+                                             fit.sigma_max_freq, strictly_enforced=strict)
         if not res.noise.ok:                        # the netlist stays noiseless, say so
             res.messages.append(res.noise.message)
     track.enter("dc")                               # after the generator, so it is checked too

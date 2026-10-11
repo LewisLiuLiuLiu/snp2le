@@ -202,13 +202,16 @@ def generator_elements(A, C, K, V0, sensors, w0, ground="0"):
     return els
 
 
-def add_thermal_noise(ir, vf, sigma_max=None, sigma_max_freq=None) -> NoiseHealth:
+def add_thermal_noise(ir, vf, sigma_max=None, sigma_max_freq=None,
+                      strictly_enforced=False) -> NoiseHealth:
     """Append the thermal-noise generator of the fit `vf` to its realisation `ir`, in place.
 
     Returns a NoiseHealth.  When `ok` is False nothing was added and `message` says why,
     which is either a model that is not strictly passive or a factor that failed its check.
     `sigma_max` and `sigma_max_freq` are the fit's own measurement (universal.FitResult),
-    quoted in that message so it names the same number as the passivity result."""
+    quoted in that message so it names the same number as the passivity result.
+    `strictly_enforced` says the fit was already enforced at ceiling 1.00.  It only picks
+    the advice in the message, the decision comes from the model alone."""
     from .units import format_eng
     fail = "thermal noise NOT added: "
     sensors = _port_sensors(ir)
@@ -240,9 +243,11 @@ def add_thermal_noise(ir, vf, sigma_max=None, sigma_max_freq=None) -> NoiseHealt
             sigma = np.sqrt(max(0.0, 1.0 - min(loss_min, d_loss)))
             where = (f"at {format_eng(f[k], 'Hz')}" if loss_min <= d_loss
                      else "at high frequency")
+        advice = ("Enforcement at ceiling 1.00 could not bring it below 1, try another Max "
+                  "order or a narrower fit range" if strictly_enforced
+                  else "Enforce passivity at ceiling 1.00, or try another Max order")
         return NoiseHealth(False, fail + f"the model is not strictly passive (sigma_max "
-                                         f"{sigma:.4f} {where}). Enforce passivity at "
-                                         f"ceiling 1.00, or try another Max order",
+                                         f"{sigma:.4f} {where}). {advice}",
                            loss_min=min(loss_min, d_loss))
 
     w0 = float(np.max(np.abs(np.atleast_1d(vf.poles))))
