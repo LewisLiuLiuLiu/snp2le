@@ -786,6 +786,9 @@ class TopBar(QtWidgets.QWidget):
             self.changed.emit()
 
     def values(self) -> dict:
+        # the center-tapped page has no Segments, so its hidden count stays out of that fit
+        segments_shown = (not self.basic.isChecked()
+                          and self._struct_ports.get(self.structure.currentData()) != 3)
         return {
             "mode": self.mode.currentData(),
             "structure_key": self.structure.currentData(),
@@ -793,7 +796,7 @@ class TopBar(QtWidgets.QWidget):
             "n_segments": int(self.stages.value()),
             "iso_resistor": bool(self.iso_r.isChecked()),
             "basic_model": bool(self.basic.isChecked()),
-            "coil_segments": 0 if self.basic.isChecked() else int(self.coil_segments.currentData()),
+            "coil_segments": int(self.coil_segments.currentData()) if segments_shown else 0,
             "substrate": "auto",                 # CLI only (--substrate)
             "peak_q_weight": DEFAULT_PEAK_Q_WEIGHT if self.peak_q.isChecked() else 0.0,
             "shunt_accuracy": DEFAULT_SHUNT_ACCURACY if self.measured.isChecked() else 0.0,
