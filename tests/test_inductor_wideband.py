@@ -434,3 +434,22 @@ def test_a_capacitor_is_refused_with_a_reason():
         assert not res.ok
         assert res.error == ("the input is not inductive anywhere in the fit band, this does "
                              "not look like an on-chip inductor")
+
+
+def test_the_cli_says_what_a_wideband_structure_ignores(tmp_path, capsys):
+    """--fext and --tolerances mean nothing to a model fitted over the band, a wideband
+    option without --mode structure names the missing mode, and the center-tapped summary
+    counts segments per half."""
+    from snp2le import cli
+    out = str(tmp_path / "ind.spice")
+    assert cli.main(["convert", os.path.join(EXAMPLES, IND), "--mode", "structure",
+                     "--structure", "inductor-wideband", "--basic", "--fext", "5GHz",
+                     "--tolerances", "-o", out]) == 0
+    assert ("--fext, --tolerances ignored, the wideband inductors are fitted over the band"
+            in capsys.readouterr().err)
+    assert cli.main(["convert", os.path.join(EXAMPLES, IND), "--structure",
+                     "inductor-wideband", "--basic", "-o", out]) == 0
+    assert "--basic ignored, these need --mode structure" in capsys.readouterr().err
+    assert cli.main(["convert", os.path.join(EXAMPLES, IND_CT), "--mode", "structure",
+                     "--structure", "inductor-ct", "--basic", "-o", out]) == 0
+    assert "1 segment per half" in capsys.readouterr().out
