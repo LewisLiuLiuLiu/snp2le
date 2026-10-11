@@ -46,6 +46,8 @@ live in `engine._PLAN_UNIVERSAL` / `_PLAN_STRUCTURE`), and `ProgressReporter` is
 a thread-safe sink that also keeps elapsed time and an ETA. Core stays Qt-free:
 the reporter is plain `threading`.
 
+`engine.convert` runs the whole conversion on one BLAS thread (`engine._one_blas_thread`, threadpoolctl 3.5 or newer, the first release that finds the scipy-openblas libraries of numpy 2 and scipy wheels). The matrices are small, and with the default 14 threads on a hybrid laptop CPU a 7-port core at order 24 with thermal noise converted in 905 s against 2.2 s on one thread. threadpoolctl changes the loaded libraries at run time and restores them afterwards, where environment variables would also reach every simulator snp2le starts. An explicit `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` turns the limit off, and so does a missing threadpoolctl. One thread gives the same result as an `OPENBLAS_NUM_THREADS=1` run of 0.1.11 in every record of the option-space dump. Against 0.1.11 at 14 threads the universal netlists of the bundled examples are unchanged at their printed digits, while a few wideband inductor fits settle elsewhere along their weakly determined values, the same kind of move another numpy or scipy makes.
+
 Two parts of the pipeline report from inside, which is what makes the fraction
 track real work rather than count steps:
 
@@ -192,7 +194,7 @@ pytest
   (`two_port`), `wpd_ihp-sg13g2.s3p` at `--order 13` (`three_port`) and
   `blc_ihp-sg13g2.s4p` at `--order 8` (`four_port`), exported with `--format both`.
   The rendered float tails depend on the BLAS the fit ran on, so a regeneration on
-  another platform can differ in the last digits without anything being wrong.
+  another platform can differ in the last digits without anything being wrong. The committed files differ from a Windows export (numpy 2.4, scipy 1.17) in 10 numbers by at most 4.8e-10, at one thread and at 14 alike.
 * A 0 Hz (DC) sample is dropped automatically, since it breaks the
   Y-/ABCD-parameter extraction and the MNA rebuild.
 * The transmission-line ladder uses 2 L-cells by default (`N_SEGMENTS` in
