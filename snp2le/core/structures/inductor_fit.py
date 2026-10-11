@@ -533,6 +533,16 @@ class _Ticker:
 
 # ---------------- analytic seed values ----------------
 
+def _start_inside(x0, lower, upper):
+    """A seed fit's start, clipped into its bounds as the global fit's starts are.
+    least_squares refuses a start outside them, which a lossy coil reaches when its skin seed
+    Rskin/(2 pi f_corner) exceeds the 1 uH cap.  A start inside is returned unchanged."""
+    if not np.all(np.isfinite(x0)):
+        raise ValueError("the data gives no usable starting value for the series branch, it "
+                         "does not look like an on-chip inductor")
+    return np.clip(x0, lower, upper)
+
+
 def _seed_series(Yser, omega, fit_mask, num_skin_sections):
     """Staged fit of R-L(+skin)||Cs to a series branch on log parameters.  Returns Rs, Ls,
     Rskin1, Lskin1, Rskin2, Lskin2, Cs."""
@@ -560,9 +570,10 @@ def _seed_series(Yser, omega, fit_mask, num_skin_sections):
         return _complex_residual(model, y_data, _floored_norm(y_data), 1.0)
 
     Yser_fit = Yser[fit_mask]
-    res = least_squares(series_residuals_rlc, x0=np.log10([Rs0, Ls0, 1e-15]),
-                        args=(omega_fit, Yser_fit),
-                        bounds=(np.log10([1e-4, 1e-13, 1e-19]), np.log10([1e4, 1e-6, 1e-11])))
+    rlc_lower, rlc_upper = np.log10([1e-4, 1e-13, 1e-19]), np.log10([1e4, 1e-6, 1e-11])
+    res = least_squares(series_residuals_rlc,
+                        x0=_start_inside(np.log10([Rs0, Ls0, 1e-15]), rlc_lower, rlc_upper),
+                        args=(omega_fit, Yser_fit), bounds=(rlc_lower, rlc_upper))
     Rs1, Ls1, Cs1 = 10 ** res.x
 
     # The skin corners are not known in advance: try (pairs of) seed corners spread over the
@@ -583,7 +594,9 @@ def _seed_series(Yser, omega, fit_mask, num_skin_sections):
                  else 10 ** np.array(X_SKIN2_FIXED))
         x_template = np.log10([Rs1, Ls1, Rskin0, Rskin0 / (2 * math.pi * f_corner1),
                                *skin2, Cs1])
-        res = least_squares(series_residuals_skin, x0=x_template[series_free],
+        res = least_squares(series_residuals_skin,
+                            x0=_start_inside(x_template[series_free], series_lower,
+                                             series_upper),
                             args=(x_template, omega_fit, Yser_fit),
                             bounds=(series_lower, series_upper))
         if best is None or res.cost < best.cost:
@@ -652,9 +665,10 @@ def _fit_band(f, srf):
     fmax = min(SRF_FIT_FACTOR * srf, f[-1]) if srf is not None else f[-1]
     fit_mask = f <= fmax
     if np.count_nonzero(fit_mask) < MIN_FIT_POINTS:
-        raise ValueError(f"only {np.count_nonzero(fit_mask)} points up to "
-                         f"{SRF_FIT_FACTOR} x SRF ({_ghz(fmax)}), the fit needs "
-                         f"{MIN_FIT_POINTS}")
+        limit = (f"{SRF_FIT_FACTOR} x SRF ({_ghz(fmax)})" if fmax < f[-1]
+                 else f"{_ghz(fmax)}, the end of the data or fit range")
+        raise ValueError(f"only {np.count_nonzero(fit_mask)} points up to {limit}, the fit "
+                         f"needs {MIN_FIT_POINTS}")
     return fmax, fit_mask
 
 
@@ -702,6 +716,8 @@ def _shorted_substrate(fit, locations, omega_max, tied=()):
 
 
 def _srf_message(srf_data, srf_model, f_last):
+    if srf_data is None and srf_model is None:
+        return "no self-resonance in the data or in the model"
     if srf_data is None:
         return (f"no self-resonance in the data, the model's ({_ghz(srf_model)}) is "
                 f"extrapolated")
@@ -738,6 +754,9 @@ def fit_two_port(net, basic=False, segments=None, substrate="auto", peak_q_weigh
     SRF_meas = min(srf_candidates) if srf_candidates else None
     SRFdiff_meas = find_srf(f, Ydiff_meas)
     fmax, fit_mask = _fit_band(f, SRF_meas)
+    if not np.any(L11_meas[fit_mask] > 0):
+        raise ValueError("the input is not inductive anywhere in the fit band, this does not "
+                         "look like an on-chip inductor")
     f_fit = f[fit_mask]
     omega_fit = omega[fit_mask]
     lq_mask = _below(f, fit_mask, SRF_meas)

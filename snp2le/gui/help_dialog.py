@@ -94,7 +94,7 @@ residues, so a violation band that runs to infinity, caused by a non-passive con
 term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at order 13
 stays at 5.24 whatever you ask for. The accurate fit is then kept rather than a wrecked
 one and the result reads <i>near-passive</i>. The fix is a lower <b>Max order</b>, not a
-higher ceiling, since order 6 brings the same file to 1.018.</p></li>
+higher ceiling, since order 6 brings the same file to 0.9997.</p></li>
 <li><b>Thermal noise</b> (universal mode): a lossy passive at temperature T is a noise
 source, and its noise follows from its S-parameters alone, kT(I&nbsp;&minus;&nbsp;S&nbsp;S<sup>H</sup>)
 at its ports (Bosma's theorem). Unticked (the default), the model is noiseless, an ideal
@@ -320,8 +320,10 @@ stopped only if it goes idle (uses no CPU for a while) and looks genuinely hung.
 
 <p style="color:#7d828c"><i>Universal mode is built on scikit-rf vector fitting. The VACASK
 passive, controlled-source (vccs, cccs) and ground (<tt>GND</tt>) handling are confirmed
-against VACASK. The <tt>mutual</tt>-coupling syntax used by the transformer models is not
-yet hardware-verified.</i></p>"""
+against VACASK. So is the <tt>mutual</tt> coupling of the balun and the wideband inductors:
+VACASK takes k from 0 to 1 only, so a negative k (the balun) is written as the positive one
+with one coil's terminals swapped, and the bundled testbenches declare
+<tt>model mutual mutual</tt>.</i></p>"""
 
 
 class HelpDialog(QtWidgets.QDialog):

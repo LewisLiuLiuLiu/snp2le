@@ -211,6 +211,16 @@ def test_a_model_that_is_not_strictly_passive_is_refused():
     assert f"sigma_max {res.sigma_max:.4f}" in res.noise.message
     assert res.noise.message in res.messages
     assert "nz_" not in res.ngspice + res.vacask and not res.ir.notes
+    assert "Enforce passivity at ceiling 1.00" in res.noise.message
+
+
+def test_the_refusal_advice_follows_what_enforcement_already_did():
+    """Enforced at 1.00 and still above 1 (the balun at order 6, where the constant term
+    exceeds 1), the advice is another order or band, not the enforcement that already ran."""
+    res = _convert("balun_ihp-sg13cmos5l.s4p")
+    assert res.ok and not res.noise.ok and res.sigma_max > 1.0
+    assert "could not bring it below 1, try another Max order" in res.noise.message
+    assert "Enforce passivity at" not in res.noise.message
 
 
 def test_structure_mode_ignores_the_option():

@@ -164,6 +164,22 @@ def test_loading_a_design_releases_a_pinned_segment_count(bar):
     assert bar.coil_segments.isEnabled() and bar.coil_segments.currentData() == 0
 
 
+def test_a_hidden_segment_count_never_reaches_the_center_tap_fit(bar):
+    """The center-tapped page has no Segments, so a count set on the 2-port page stays
+    behind instead of fixing the center-tapped fit unseen."""
+    bar.set_ports(2)
+    _select(bar, "inductor-wideband")
+    bar.coil_segments.setCurrentIndex(bar.coil_segments.findData(1))
+    assert bar.values()["coil_segments"] == 1
+    bar.set_ports(3)
+    _select(bar, "inductor-ct")
+    assert bar.segments_box.isHidden()
+    assert bar.values()["coil_segments"] == 0
+    bar.set_ports(2)
+    _select(bar, "inductor-wideband")
+    assert bar.values()["coil_segments"] == 1
+
+
 def test_the_values_the_bar_reports(bar):
     """Tick boxes carry inductor_fit's default weights, the substrate is CLI only."""
     v = bar.values()

@@ -46,7 +46,8 @@ import time
 from snp2le.core import io, engine, units, netlist, universal
 from snp2le.core.progress import format_duration
 from snp2le.core.state import ConverterState
-from snp2le.core.structures import get_structure, inductor_fit, structure_items
+from snp2le.core.structures import (STRUCTURES, get_structure, inductor_fit,
+                                    structure_items)
 
 # extensions in the testbench's data folder that are never a result table
 _NON_DATA = {".raw", ".spice", ".inc", ".cir", ".net", ".log", ".out", ".svg", ".png",
@@ -442,9 +443,11 @@ def cmd_convert(args):
                 else args.passivity_ceiling)
     given = _wideband_options_given(args)
     struct = get_structure(args.structure) if args.mode == "structure" else None
+    named_wideband = getattr(STRUCTURES.get(args.structure), "wideband", False)
     if given and not (struct is not None and struct.wideband):
-        print(f"[WARN] {', '.join(given)} ignored, these apply to the wideband inductor "
-              f"structures (inductor-wideband, inductor-ct) only", file=sys.stderr)
+        why = ("need --mode structure" if named_wideband else "apply to the wideband "
+               "inductor structures (inductor-wideband, inductor-ct) only")
+        print(f"[WARN] {', '.join(given)} ignored, these {why}", file=sys.stderr)
     elif given:
         if args.ct_port is not None and struct.n_ports != 3:
             print("[WARN] --ct-port is ignored, it applies to inductor-ct only",
@@ -458,6 +461,12 @@ def cmd_convert(args):
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
+    if struct is not None and struct.wideband:
+        unused = [name for name, on in (("--fext", args.fext is not None),
+                                        ("--tolerances", args.tolerances)) if on]
+        if unused:
+            print(f"[WARN] {', '.join(unused)} ignored, the wideband inductors are fitted "
+                  f"over the band and have no extraction frequency", file=sys.stderr)
     if args.thermal_noise and args.mode == "structure":
         print("[WARN] --thermal-noise is ignored in structure mode, whose resistors are the "
               "structure's loss and always carry their thermal noise", file=sys.stderr)
@@ -476,7 +485,8 @@ def cmd_convert(args):
             mode=args.mode, structure_key=args.structure,
             max_order=args.order, enforce_passivity=args.passive,
             passivity_ceiling=p_ceiling, thermal_noise=args.thermal_noise,
-            f_extract=args.fext, n_segments=args.stages, iso_resistor=args.iso_r,
+            f_extract=ConverterState.f_extract if args.fext is None else args.fext,
+            n_segments=args.stages, iso_resistor=args.iso_r,
             basic_model=args.basic, coil_segments=args.segments or 0,
             substrate=args.substrate, peak_q_weight=args.peak_q_weight or 0.0,
             shunt_accuracy=args.shunt_accuracy or 0.0, center_tap=args.ct_port or 0,
@@ -533,7 +543,8 @@ def cmd_convert(args):
                 elif res.metrics.get("f_fit_max") is not None:   # wideband, no f_ext
                     n = res.metrics.get("segments", 1)
                     extra = (f"fit to {units.format_eng(res.metrics['f_fit_max'], 'Hz')}, "
-                             f"{n} segment{'' if n == 1 else 's'}")
+                             f"{n} segment{'' if n == 1 else 's'}"
+                             f"{' per half' if res.n_ports == 3 else ''}")
                 else:
                     extra = f"f_ext={units.format_eng(res.metrics.get('f_extract'), 'Hz')}"
                 print(f"[ OK ] {src} -> {out}  ({dialect}, {extra}, "
@@ -622,8 +633,8 @@ def build_parser():
     c.add_argument("--no-thermal-noise", dest="thermal_noise", action="store_false",
                    help="emit the noiseless (ideal) model, the default")
     # structure-mode options
-    c.add_argument("--fext", type=_freq, default=10e9, metavar="FREQ",
-                   help="extraction frequency, e.g. 7GHz (structure)")
+    c.add_argument("--fext", type=_freq, default=None, metavar="FREQ",
+                   help="extraction frequency, e.g. 7GHz (structure, default 10GHz)")
     c.add_argument("--stages", type=_stages, default=2,
                    help="RLGC ladder cells, 1 to 10 (tline-rlgc)")
     # fit band (both modes): restrict the data the model is fitted to

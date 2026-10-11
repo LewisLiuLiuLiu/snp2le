@@ -126,6 +126,7 @@ pytest
   ground), so the testbench must declare `ground GND`. Ngspice keeps node `0`.
   High-order universal fits are conditioned automatically so VACASK reproduces the
   same response as Ngspice.
+* VACASK's builtin `mutual` takes k from 0 to 1 only, while the balun extracts a negative k. `netlist._vc_swapped_coils()` picks a terminal order per coupled coil that makes every k positive, which is the same circuit, and the VACASK header names the swapped coils. The Ngspice netlist keeps the negative k, which Ngspice accepts. The bundled VACASK testbenches declare `model mutual mutual` for the balun and the wideband inductors. The balun's VACASK response matches Ngspice's to 1.5e-7 in S.
 * `is_passive()` may report borderline-False even after enforcement on a good fit.
   The model is still usable. The status is reported honestly ("near-passive").
 * Passivity is also reported as a number. `universal.max_singular_value()` returns
@@ -215,7 +216,7 @@ pytest
   elements per segment, with the substrate network distributed over the coil nodes, and
   couples every half-1 cell to every half-2 cell with k/segments, which is the fit's
   M/segments^2 per cell pair. The rebuilt response matches the fit's own model function to
-  1e-9 in S (`tests/test_inductor_wideband.py`). Its k is the effective coupling
+  1e-9 in S (`tests/test_inductor_wideband.py`). A value the fit puts below the netlist's floor is raised to it (`netlist._LIMITS`, 1 aF for a capacitor), which moves the netlist off the fit: the basic fit of `ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p` ends at its C_s bound of 0.1 aF, and the 1 aF in the netlist moves S by 2.1e-4, well inside the fit's own error. Its k is the effective coupling
   including the center tap lead inductance, which terminal data cannot separate from M.
   A full fit takes 3 s (2-port) to 15 s (center tap) on the bundled examples, the basic
   model 1 s or less. A values table longer than 12 rows is shown in two columns
