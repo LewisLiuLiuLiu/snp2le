@@ -9,6 +9,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict, fields
 import json
 
+_TRUE, _FALSE = {"true", "yes", "on", "1"}, {"false", "no", "off", "0"}
+
+
+def _as_bool(name, value):
+    """A tick-box field of a loaded design.  A saved design holds JSON true/false, a
+    hand-edited one may hold 0/1 or a word, and bool("no") would read as True."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str) and value.strip().lower() in _TRUE | _FALSE:
+        return value.strip().lower() in _TRUE
+    raise ValueError(f"{name} must be true or false, got {value!r}")
+
 
 @dataclass
 class ConverterState:
@@ -49,8 +63,17 @@ class ConverterState:
     @classmethod
     def from_json(cls, text: str) -> "ConverterState":
         data = json.loads(text)
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        known = {f.name: f for f in fields(cls)}
+        values = {}
+        for k, v in data.items():
+            if k not in known:
+                continue
+            if isinstance(known[k].default, bool):
+                if v is None:                 # null: the default, like a missing key
+                    continue
+                v = _as_bool(k, v)
+            values[k] = v
+        return cls(**values)
 
 
 @dataclass

@@ -438,6 +438,27 @@ def test_fit_range_survives_a_design_round_trip():
     assert ConverterState.from_json('{"mode": "universal"}').f_min is None
 
 
+def test_a_hand_edited_design_reads_its_tick_boxes_as_written():
+    """bool("no") is True, so a design saying "thermal_noise": "no" used to tick the box.
+    Words, 0/1 and null now read as meant, anything else refuses to load with the field's
+    name (the GUI shows it in its Load failed dialog), and a saved design is unchanged."""
+    import json
+    import pytest
+    load = lambda **kw: ConverterState.from_json(json.dumps(kw))     # noqa: E731
+    assert load(thermal_noise="no").thermal_noise is False
+    assert load(thermal_noise=" Yes ").thermal_noise is True
+    assert load(enforce_passivity="false").enforce_passivity is False
+    assert load(iso_resistor=0).iso_resistor is False
+    assert load(basic_model=1).basic_model is True
+    assert load(enforce_passivity=None).enforce_passivity is True       # null: the default
+    for bad in ("maybe", 2, [], {}):
+        with pytest.raises(ValueError, match="thermal_noise must be true or false"):
+            load(thermal_noise=bad)
+    st = ConverterState(thermal_noise=True, enforce_passivity=False, basic_model=True,
+                        iso_resistor=False)
+    assert ConverterState.from_json(st.to_json()) == st
+
+
 def test_restrict_band_keeps_the_network_intact():
     """The cropped network is a real skrf Network, not a view: same ports and z0."""
     net = inductor_2port()
