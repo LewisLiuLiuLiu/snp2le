@@ -126,6 +126,7 @@ pytest
   ground), so the testbench must declare `ground GND`. Ngspice keeps node `0`.
   High-order universal fits are conditioned automatically so VACASK reproduces the
   same response as Ngspice.
+* VACASK's builtin `mutual` takes k from 0 to 1 only, while the balun extracts a negative k. `netlist._vc_swapped_coils()` picks a terminal order per coupled coil that makes every k positive, which is the same circuit, and the VACASK header names the swapped coils. The Ngspice netlist keeps the negative k, which Ngspice accepts. The bundled VACASK testbenches declare `model mutual mutual` for the balun and the wideband inductors. The balun's VACASK response matches Ngspice's to 1.5e-7 in S.
 * `is_passive()` may report borderline-False even after enforcement on a good fit.
   The model is still usable. The status is reported honestly ("near-passive").
 * Passivity is also reported as a number. `universal.max_singular_value()` returns

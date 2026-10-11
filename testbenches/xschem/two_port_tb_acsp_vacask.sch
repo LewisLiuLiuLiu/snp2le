@@ -55,6 +55,7 @@ model capacitor capacitor
 model inductor inductor
 model vccs vccs
 model cccs cccs
+model mutual mutual
 load \\"capacitor.osdi\\"
 load \\"inductor.osdi\\"
 include \\"../../../netlist/spectre/two_port.inc\\"

@@ -223,6 +223,34 @@ def test_balun_extracts_transformer():
     assert "K1 L5 L9" in res.ngspice and "K2 L7 L8" in res.ngspice
     # VACASK builtin mutual inductance: K1 () mutual k=.. ind1="L5" ind2="L9"
     assert 'K1 () mutual' in res.vacask and 'ind1="L5" ind2="L9"' in res.vacask
+
+
+def test_vacask_turns_a_negative_coupling_into_a_swapped_coil():
+    """VACASK's mutual refuses k < 0 ("Parameter 'k' must be between 0 and 1"), which the
+    balun extracts.  Its netlist swaps one coil's terminals instead, so every k is positive.
+    Rebuilt from the coil terminals and k values in the VACASK text, it is the same circuit."""
+    import copy
+    import re
+    from snp2le.core import mna, netlist
+    res = engine.convert(ConverterState(mode="structure", structure_key="balun",
+                                        f_extract=7e9), _example("balun_ihp-sg13cmos5l.s4p"))
+    assert res.ok and all(k < 0 for _a, _b, k in res.ir.couplings)
+    coils = {m[0]: (m[1], m[2]) for m in re.findall(r"^\s+(L\w+) \((\S+) (\S+)\) inductor",
+                                                     res.vacask, re.M)}
+    ks = re.findall(r'mutual k=(\S+) ind1="(\w+)" ind2="(\w+)"', res.vacask)
+    assert ks and all(float(k) > 0 for k, _a, _b in ks)
+    rebuilt = copy.deepcopy(res.ir)
+    for e in rebuilt.elements:
+        if e.kind == "L":
+            e.nodes = tuple("0" if n == "GND" else n for n in coils[e.name])
+    rebuilt.couplings = [(a, b, float(k)) for k, a, b in ks]
+    f = np.linspace(1e9, 40e9, 40)
+    assert np.allclose(mna.rlc_sparams(rebuilt, f), mna.rlc_sparams(res.ir, f),
+                       rtol=1e-9, atol=1e-12)
+    # no negative k, nothing swapped; an odd loop of negative k cannot be balanced
+    assert netlist._vc_swapped_coils([("La", "Lb", 0.3)]) == set()
+    assert netlist._vc_swapped_coils([("La", "Lb", -0.3), ("Lb", "Lc", -0.3),
+                                      ("La", "Lc", -0.3)]) == set()
     assert "mutual" in res.vacask.split("models needed")[1].split("\n")[0]  # in models list
 
 

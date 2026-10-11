@@ -320,8 +320,10 @@ stopped only if it goes idle (uses no CPU for a while) and looks genuinely hung.
 
 <p style="color:#7d828c"><i>Universal mode is built on scikit-rf vector fitting. The VACASK
 passive, controlled-source (vccs, cccs) and ground (<tt>GND</tt>) handling are confirmed
-against VACASK. The <tt>mutual</tt>-coupling syntax used by the transformer models is not
-yet hardware-verified.</i></p>"""
+against VACASK. So is the <tt>mutual</tt> coupling of the balun and the wideband inductors:
+VACASK takes k from 0 to 1 only, so a negative k (the balun) is written as the positive one
+with one coil's terminals swapped, and the bundled testbenches declare
+<tt>model mutual mutual</tt>.</i></p>"""
 
 
 class HelpDialog(QtWidgets.QDialog):
