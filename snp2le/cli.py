@@ -32,7 +32,8 @@
         --simulate testbenches/xschem/two_port_tb_acsp_ngspice.sch --plot
 
 Globs are expanded.  With --format both, two files are written per input.  The exit code is
-non-zero if any conversion or a requested simulation fails.
+non-zero if any conversion or a requested simulation fails.  A failed conversion writes
+nothing and removes the files an earlier run left at its output paths.
 """
 from __future__ import annotations
 import argparse
@@ -191,6 +192,22 @@ def _out_path(src, explicit, dialect, n_inputs, n_formats):
         return f"{os.path.splitext(explicit)[0]}.{ext}"      # both: keep -o dir + stem
     base = os.path.splitext(os.path.basename(src))[0]         # many inputs: after each source
     return f"{base}.{ext}"
+
+
+def _remove_stale(outs, written):
+    """Delete what an earlier run left at the paths a failed conversion would have written.
+    A file there would pass for this run's result, for example an old noiseless netlist after
+    a refused --thermal-noise, which a Makefile then takes as up to date.  Files this run
+    wrote stay (two inputs can share an output name)."""
+    for out in outs:
+        if os.path.abspath(out) in written or not os.path.isfile(out):
+            continue
+        try:
+            os.remove(out)
+            print(f"       removed {out}, left there by an earlier run", file=sys.stderr)
+        except OSError as exc:
+            print(f"[WARN] could not remove {out} left there by an earlier run: {exc}",
+                  file=sys.stderr)
 
 
 def _valid_sparams(names, n):
@@ -474,11 +491,14 @@ def cmd_convert(args):
     formats = ["ngspice", "vacask"] if args.format == "both" else [args.format]
     rc = 0
     last_res = None
+    written = set()                     # absolute paths this run wrote
     for src in paths:
+        outs = [_out_path(src, args.output, d, len(paths), len(formats)) for d in formats]
         try:
             net = io.load_touchstone(src)
         except Exception as exc:                          # noqa: BLE001
             print(f"[FAIL] {src}: {exc}", file=sys.stderr)
+            _remove_stale(outs, written)
             rc = 1
             continue
         state = ConverterState(
@@ -501,17 +521,18 @@ def cmd_convert(args):
         elapsed = time.monotonic() - t_start
         if not res.ok:
             print(f"[FAIL] {src}: {res.error}", file=sys.stderr)
+            _remove_stale(outs, written)
             rc = 1
             continue
         if res.noise is not None and not res.noise.ok:
             # a noiseless netlist under a name the caller expects to be noisy would go
             # into a noise budget unnoticed, so nothing is written
             print(f"[FAIL] {src}: {res.noise.message}", file=sys.stderr)
+            _remove_stale(outs, written)
             rc = 1
             continue
         last_res = res
-        for dialect in formats:
-            out = _out_path(src, args.output, dialect, len(paths), len(formats))
+        for dialect, out in zip(formats, outs):
             if res.ir is not None:
                 # name the .SUBCKT after the output file (bpf_le.spice -> bpf_le), so a
                 # testbench that instantiates that name resolves the .include.  The GUI export
@@ -527,6 +548,7 @@ def cmd_convert(args):
                 os.makedirs(parent, exist_ok=True)
                 with open(out, "w", encoding="utf-8", newline="\n") as fh:
                     fh.write(text)
+                written.add(os.path.abspath(out))
             except OSError as exc:
                 print(f"[FAIL] {src} -> {out}: {exc}", file=sys.stderr)
                 rc = 1

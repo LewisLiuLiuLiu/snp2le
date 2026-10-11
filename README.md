@@ -248,7 +248,7 @@ A universal model cannot take that noise from its own resistors, which place the
 - In a noise analysis the block's share is the sum of its `Rnz_e*` entries. Both dialects carry the generator, the simulators differ in which analyses see it. VACASK sees it in `noise`, `hbnoise`, `pnoise` and transient noise (`noisemode="sde"`). Ngspice sees it in `.noise` only, since it has no periodic noise analysis and adds no resistor noise to a transient run, so a mixer's noise figure through a fitted passive is a VACASK job.
 - The netlist grows by about 2N + 3 lines per state, where a model has N times its model order states: the bundled WPD at order 6 (fitted at model order 4, 12 states) gains 113 lines, a 7-port at order 23 goes from 1892 to 4659.
 
-**It needs a strictly passive model.** The generator exists only where sigma_max stays below 1 at every frequency, far outside the data included, so keep *Enforce passivity* ticked at a ceiling of `1.00`. When the model still is not strictly passive (a raised ceiling, enforcement off, or a fit enforcement cannot fix), no noise is added and the message names the model's sigma_max. The GUI still shows the model and its plots, its Result panel reads *NOT added*, and Export refuses. The CLI writes no file and exits non-zero. A noiseless netlist under a name you asked to be noisy would otherwise enter a noise budget unnoticed.
+**It needs a strictly passive model.** The generator exists only where sigma_max stays below 1 at every frequency, far outside the data included, so keep *Enforce passivity* ticked at a ceiling of `1.00`. When the model still is not strictly passive (a raised ceiling, enforcement off, or a fit enforcement cannot fix), no noise is added and the message names the model's sigma_max. The GUI still shows the model and its plots, its Result panel reads *NOT added*, and Export refuses. The CLI writes no file, removes one an earlier run left at that path, and exits non-zero. A noiseless netlist under a name you asked to be noisy would otherwise enter a noise budget unnoticed.
 
 Every generator is checked before it is added: V V<sup>H</sup> = I - S S<sup>H</sup> over DC, the data band and four decades either side, within 1e-6 kT (the bundled examples land between 1e-15 and 1e-13). Simulated, with every port terminated in noiseless 50 ohm, the port noise must be Z<sub>0</sub> kT(I - S S<sup>H</sup>):
 
@@ -351,7 +351,7 @@ snp2le -b list-structures
 snp2le -b convert <file.sNp> [options]
 ```
 
-From a source checkout without installing, use `python -m snp2le -b ...` in place of `snp2le -b`. Without `-b`, a single file argument opens the GUI on that file instead (see [Run the GUI](https://github.com/iic-jku/snp2le#run-the-gui)).
+From a source checkout without installing, use `python -m snp2le -b ...` in place of `snp2le -b`. The exit code is non-zero if any conversion fails, and a failed conversion writes nothing and removes the files an earlier run left at its output paths, so a Makefile never takes an old netlist for the result. Without `-b`, a single file argument opens the GUI on that file instead (see [Run the GUI](https://github.com/iic-jku/snp2le#run-the-gui)).
 
 ### `convert` options
 

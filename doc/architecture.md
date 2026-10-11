@@ -183,7 +183,7 @@ pytest
   side (`noise.CHECK_TOL`, 1e-6 kT). A model that is not strictly passive, has a
   proportional term or fails the check gets no generator, `Results.noise.ok` is False
   with the reason, the engine adds that reason to `messages`, the GUI refuses Export
-  and the CLI writes nothing and exits non-zero. Its notes go into `CircuitIR.notes`,
+  and the CLI writes nothing and exits non-zero. Any failed CLI conversion also removes the files an earlier run left at its output paths (`cli._remove_stale`), except those the same run wrote, so a Makefile cannot take a stale netlist for the result. Its notes go into `CircuitIR.notes`,
   which the renderers print in full after the provenance comments. `_PLAN_UNIVERSAL_NOISE`
   carries the extra stage, so the default plan's progress fractions are unchanged.
   `tests/test_noise.py` solves the emitted circuit with its own AC noise analysis and
