@@ -54,6 +54,23 @@ def test_universal_fits_and_renders():
     assert res.model_s.shape == (len(net.f), 2, 2)
 
 
+def test_netlist_values_read_back_as_the_same_doubles():
+    """A universal realisation relies on cancellation between its controlled-source gains,
+    so every value is written as the shortest text that reads back as the same double.  With
+    10 significant digits a synthetic 2-port fitted at order 24 missed its own model by 1.0
+    in S, while the text written now reproduces the circuit exactly."""
+    import re
+    from snp2le.core import netlist
+    res = engine.convert(ConverterState(mode="universal", max_order=13, thermal_noise=True),
+                         _example("bpf_ihp-sg13g2.s2p"))
+    assert res.ok and res.noise.ok
+    back = netlist.parse_spice_subckt(res.ngspice)
+    assert [(e.name, e.value) for e in back.elements] == \
+        [(e.name, e.value) for e in res.ir.elements]
+    written = {float(v) for v in re.findall(r"\b(?:r|c|l|gain|dc|k)=(\S+)", res.vacask)}
+    assert {float(e.value) for e in res.ir.elements} <= written
+
+
 def test_universal_high_order_resistors_above_ngspice_floor():
     """Regression: scikit-rf's fast-pole state resistors can fall below ngspice's
     1e-12 floor at higher orders. Rounding them up corrupts S11/S22.  They must be

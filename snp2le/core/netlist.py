@@ -14,7 +14,10 @@ from .ir import CircuitIR, Element
 
 
 def _num(x: float) -> str:
-    return f"{x:.10g}"
+    # The shortest text that reads back as the same double.  A universal realisation relies
+    # on cancellation between its controlled-source gains, and with 10 significant digits a
+    # synthetic 2-port fitted at order 24 missed its own model by 1.0 in S.
+    return repr(float(x))
 
 
 # Simulator element-value limits.  Ngspice floors a resistance below 1e-12 ohm to
