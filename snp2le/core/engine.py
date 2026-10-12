@@ -24,6 +24,7 @@ from .state import Results
 from .progress import StageTracker
 from .process_state import ProcessSetting
 from . import netlist as _nl
+from . import dcpin as _pin
 from . import universal as _uni
 from . import mna as _mna
 from .structures import STRUCTURES, get_structure
@@ -128,6 +129,7 @@ def _convert(state, net, progress=None) -> Results:
 
     from . import io as _io
     track.enter("prepare")
+    loaded = net
     net = _io.without_dc(net)            # a 0 Hz sample breaks the extraction math
     n_file = len(net.f)
     f_file_lo = float(net.f[0]) if n_file else 0.0
@@ -143,11 +145,23 @@ def _convert(state, net, progress=None) -> Results:
     res.n_ports = net.nports
     res.data_s = net.s
 
+    # The same band with the file's 0 Hz point still in it, for passivity enforcement to try
+    # a refit that includes it.  Only when the band starts at the file's first sample above
+    # 0 Hz, and not for a 0 Hz row that is not finite, which the file then carries for nothing.
+    dc_net = None
+    has_dc = bool(len(loaded.f) and loaded.f[0] == 0 and np.all(np.isfinite(loaded.s[0])))
+    if (state.mode != "structure" and has_dc and len(net.f) and n_file
+            and net.f[0] == f_file_lo):
+        dc_net = _io.passive_dc(_io.restrict_band(loaded, None, state.f_max)[0],
+                                ceiling=_pin.DC_SIGMA)[0]
+    # the file's 0 Hz S-matrix, which the DC pin makes the model meet
+    dc_s = loaded.s[0] if state.mode != "structure" and state.dc_pin and has_dc else None
+
     try:
         if state.mode == "structure":
             _convert_structure(state, net, res, track)
         else:
-            _convert_universal(state, net, res, track)
+            _convert_universal(state, net, res, track, dc_net, dc_s)
     except Exception as exc:                        # noqa: BLE001
         res.ok = False
         res.error = error_text(exc)
@@ -175,12 +189,13 @@ def _summary(res) -> str:
     return f"{n} element{'' if n == 1 else 's'} extracted"
 
 
-def _convert_universal(state, net, res, track):
+def _convert_universal(state, net, res, track, dc_net=None, dc_s=None):
     from . import dc as _dc
     fit = _uni.fit_universal(net, max_order=state.max_order,
                              enforce_passivity=state.enforce_passivity,
                              passivity_ceiling=state.passivity_ceiling,
-                             progress=track.sub("fit"))
+                             progress=track.sub("fit"), dc_net=dc_net,
+                             prefer_strict=state.thermal_noise)
     res.ir = fit.ir
     res.physical = False
     res.n_poles = fit.n_poles
@@ -207,9 +222,40 @@ def _convert_universal(state, net, res, track):
         z0 = float(np.real(np.asarray(net.z0).flatten()[0])) or 50.0
     except (TypeError, ValueError, IndexError):
         z0 = 50.0
-    res.dc = _dc.dc_check(res.ir, z0=z0)
+    if dc_s is not None:
+        _pin_dc(state, net, res, fit, dc_s, z0)
+    else:
+        res.dc = _dc.dc_check(res.ir, z0=z0)
     if not res.dc.ok:
         res.messages.append(res.dc.message)
+
+
+def _pin_dc(state, net, res, fit, dc_s, z0):
+    """Pin the model to the file's 0 Hz point (dcpin.py) and check the DC operating point.
+    A fit that nearly shorts a port at DC needs a correction that cancels a large conductance,
+    which can leave the DC matrix singular, so then the pin comes back out."""
+    from . import dc as _dc
+    plain = (list(res.ir.elements), list(res.ir.notes), res.model_s)
+    res.dc_pin, res.model_s = _pin.add_dc_pin(
+        res.ir, fit.vf, dc_s, np.real(np.asarray(net.z0)[0]), net.f, res.model_s,
+        fit.rms_error, fc=state.dc_pin_fc, leak=state.dc_island_leak)
+    res.dc = _dc.dc_check(res.ir, z0=z0)
+    if res.dc_pin.ok and not res.dc.ok:
+        pinned = (res.ir.elements, res.ir.notes, res.model_s)
+        res.ir.elements, res.ir.notes, res.model_s = plain
+        plain_dc = _dc.dc_check(res.ir, z0=z0)
+        if plain_dc.ok:
+            res.dc = plain_dc
+            res.dc_pin.ok = False
+            res.dc_pin.n_sources = 0
+            res.dc_pin.message = (f"DC pin skipped: it would make the DC operating point "
+                                  f"singular, since the fit nearly shorts a port at DC and the "
+                                  f"correction has to cancel up to {res.dc_pin.dy_max:.2g} S")
+        else:                                       # singular either way, keep the pin
+            res.ir.elements, res.ir.notes, res.model_s = pinned
+    if res.dc_pin.ok:                               # the overlay and RMS describe the netlist
+        res.rms_error = _rms(res.model_s, net.s)
+    res.messages.append(res.dc_pin.message)
 
 
 def _convert_structure(state, net, res, track):

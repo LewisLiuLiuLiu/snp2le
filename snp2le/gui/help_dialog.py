@@ -92,9 +92,14 @@ only as a diagnostic while you are looking at what the fit is doing.
 <p><b>A ceiling is not always reachable.</b> The perturbation only moves the model's
 residues, so a violation band that runs to infinity, caused by a non-passive constant
 term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at order 13
-stays at 5.24 whatever you ask for. The accurate fit is then kept rather than a wrecked
-one and the result reads <i>near-passive</i>. The fix is a lower <b>Max order</b>, not a
-higher ceiling, since order 6 brings the same file to 0.9997. Whenever the constant term D,
+has its constant term at 5.24. A file that carries a 0 Hz point, as this one does, then
+also gets a refit that includes it, which scikit-rf meets through the constant term, and
+it is kept if it passes and fits closer than a lower-order refit (the line comes out passive
+at model order 9 that way). With <b>Thermal noise</b> ticked, a strictly passive candidate wins
+over one that only meets a raised ceiling, since only it can carry the noise. When nothing reaches the ceiling, the
+accurate fit is kept rather than a wrecked one and the result reads <i>near-passive</i>.
+The fix is a lower <b>Max order</b>, not a higher ceiling, since order 6 brings the same
+file to 0.9997. Whenever the constant term D,
 the model's value at infinite frequency, is above the ceiling, the message line says so with
 its singular value.</p></li>
 <li><b>Thermal noise</b> (universal mode): a lossy passive at temperature T is a noise
@@ -127,7 +132,16 @@ model that says nothing outside the band. An edge outside the data is clamped to
 and reported, an empty or inverted band is refused, and clearing a field leaves that side
 at the file's own edge. The band applies to everything downstream: the RMS error, the
 tolerances, the plots, and the sweep written into a testbench run. The <b>Result</b> panel
-shows the band actually fitted, highlighted while it is a sub-band.</li>
+shows the band actually fitted, highlighted while it is a sub-band.
+<p><b>DC pin</b>, the tick box on the caption line (universal mode, ticked by default): a
+file can carry a 0 Hz sample, which the fit drops and extrapolates to, so a coil's DC
+resistance comes out tens of percent off. The pin adds the difference at DC through a
+low-pass with a 160&nbsp;Hz corner, so the model meets the 0 Hz sample exactly while the
+fitted band moves by less than the fit's own error. It is checked first, and skipped with a
+note if it would cost passivity, move the band by more than the fit's error, or make the DC
+operating point singular. In a transient run a bias step settles on a 1&nbsp;ms scale, and
+below a few kHz the thermal noise is the fit's. It acts only on a file with a 0 Hz sample,
+also below a fit range that starts above it.</p></li>
 <li><b>Model option</b> (shown only for the structure it belongs to):
   <ul>
   <li><b>Stages</b>: number of RLGC ladder cells for the transmission line (1 to 10).</li>

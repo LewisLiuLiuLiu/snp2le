@@ -26,6 +26,10 @@
     # add the passive's thermal noise, kT(I - S S^H) at the ports, to the macromodel
     snp2le -b convert wpd.s3p --mode universal --order 13 --thermal-noise --format both
 
+    # a file with a 0 Hz sample is pinned to it by default, so a coil keeps its DC resistance.
+    # Here the DC modes without a path to ground also get 1 uS, for harmonic balance
+    snp2le -b convert coil.s2p --mode universal --order 13 --dc-island-leak 1e-6
+
     # convert, run an Xschem testbench, and show data-vs-model-vs-sim plots
     snp2le -b convert bpf.s2p --mode universal --order 13 \\
         -o netlist/spice/two_port.spice \\
@@ -158,6 +162,25 @@ def _positive(text):
                                          f"value goes after the input files)")
     if not (v > 0 and v != float("inf")):
         raise argparse.ArgumentTypeError(f"must be a positive number (got {text})")
+    return v
+
+
+def _corner(text):
+    """argparse type for the DC pin's corner frequency (above 0 Hz)."""
+    v = _freq(text)
+    if not v > 0:
+        raise argparse.ArgumentTypeError(f"--dc-pin-fc must be above 0 Hz (got {text})")
+    return v
+
+
+def _leak(text):
+    """argparse type for the DC pin's island leak (0 S or more)."""
+    try:
+        v = float(text)
+    except Exception:                                       # noqa: BLE001
+        raise argparse.ArgumentTypeError(f"invalid conductance '{text}' (e.g. 1e-6)")
+    if not 0 <= v < float("inf"):
+        raise argparse.ArgumentTypeError(f"--dc-island-leak must be 0 S or more (got {text})")
     return v
 
 
@@ -487,6 +510,15 @@ def cmd_convert(args):
     if args.thermal_noise and args.mode == "structure":
         print("[WARN] --thermal-noise is ignored in structure mode, whose resistors are the "
               "structure's loss and always carry their thermal noise", file=sys.stderr)
+    pin_given = [name for name, on in (("--dc-pin", args.dc_pin is True),
+                                       ("--dc-pin-fc", args.dc_pin_fc is not None),
+                                       ("--dc-island-leak", args.dc_island_leak is not None))
+                 if on]
+    if pin_given and args.mode == "structure":
+        print(f"[WARN] {', '.join(pin_given)} ignored in structure mode, whose extraction "
+              f"drops the 0 Hz point", file=sys.stderr)
+    elif pin_given and args.dc_pin is False:
+        print(f"[WARN] {', '.join(pin_given)} ignored with --no-dc-pin", file=sys.stderr)
 
     formats = ["ngspice", "vacask"] if args.format == "both" else [args.format]
     rc = 0
@@ -505,6 +537,10 @@ def cmd_convert(args):
             mode=args.mode, structure_key=args.structure,
             max_order=args.order, enforce_passivity=args.passive,
             passivity_ceiling=p_ceiling, thermal_noise=args.thermal_noise,
+            dc_pin=args.dc_pin is not False,
+            dc_pin_fc=ConverterState.dc_pin_fc if args.dc_pin_fc is None else args.dc_pin_fc,
+            dc_island_leak=(ConverterState.dc_island_leak if args.dc_island_leak is None
+                            else args.dc_island_leak),
             f_extract=ConverterState.f_extract if args.fext is None else args.fext,
             n_segments=args.stages, iso_resistor=args.iso_r,
             basic_model=args.basic, coil_segments=args.segments or 0,
@@ -560,8 +596,9 @@ def cmd_convert(args):
                     sig = ("" if res.sigma_max != res.sigma_max
                            else f"  sigma_max={res.sigma_max:.3f}")
                     noise = "  noise=thermal" if res.noise is not None else ""
+                    pin = "  dc_pinned" if res.dc_pin is not None and res.dc_pin.ok else ""
                     extra = (f"rms={res.rms_error:.2e}  order={res.model_order}"
-                             f" ({res.n_poles} poles){sig}{dc}{noise}")
+                             f" ({res.n_poles} poles){sig}{dc}{noise}{pin}")
                 elif res.metrics.get("f_fit_max") is not None:   # wideband, no f_ext
                     n = res.metrics.get("segments", 1)
                     extra = (f"fit to {units.format_eng(res.metrics['f_fit_max'], 'Hz')}, "
@@ -576,6 +613,10 @@ def cmd_convert(args):
             print(f"[WARN] {src}: DC operating point may be singular "
                   f"(margin {res.dc.margin:.0e}); try a lower --order or --passive",
                   file=sys.stderr)
+        if (pin_given and args.dc_pin is not False and res.mode == "universal"
+                and res.dc_pin is None):
+            print(f"[WARN] {src}: {', '.join(pin_given)} ignored, the file has no finite 0 Hz "
+                  f"sample", file=sys.stderr)
         if not args.quiet:
             for m in res.messages:
                 print(f"       note: {m}")
@@ -654,6 +695,21 @@ def build_parser():
                         "passive model, else nothing is written. Default off (noiseless)")
     c.add_argument("--no-thermal-noise", dest="thermal_noise", action="store_false",
                    help="emit the noiseless (ideal) model, the default")
+    c.add_argument("--dc-pin", dest="dc_pin", action="store_true", default=None,
+                   help="pin the model to the file's 0 Hz sample with a correction below "
+                        "--dc-pin-fc, so its DC admittance (a coil's DC resistance) is the "
+                        "file's. Default on for a file with a 0 Hz sample")
+    c.add_argument("--no-dc-pin", dest="dc_pin", action="store_false",
+                   help="leave the model's DC point to the fit, which extrapolates to it")
+    c.add_argument("--dc-pin-fc", dest="dc_pin_fc", type=_corner, default=None,
+                   metavar="FREQ",
+                   help=f"corner of the DC pin's low-pass, e.g. 1kHz. Below it the "
+                        f"correction acts, above it the band moves by about fc / f. Default "
+                        f"{ConverterState.dc_pin_fc:g} Hz")
+    c.add_argument("--dc-island-leak", dest="dc_island_leak", type=_leak, default=None,
+                   metavar="S",
+                   help="conductance to ground [S] for each DC mode without a DC path, which "
+                        "can help harmonic balance converge. Default 0")
     # structure-mode options
     c.add_argument("--fext", type=_freq, default=None, metavar="FREQ",
                    help="extraction frequency, e.g. 7GHz (structure, default 10GHz)")
