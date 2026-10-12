@@ -44,6 +44,9 @@ class FitResult:
     sigma_max: float = float("nan")     # largest singular value of the model S-matrix
     sigma_max_freq: float = float("nan")   # where that peak sits [Hz]
     passivity_ceiling: float = 1.0      # sigma_max the fit was judged against
+    # how the model came out of passivity enforcement: off, not needed, perturbed,
+    # reduced order or near-passive (enforcement ran and the free fit was kept)
+    passivity_path: str = "off"
     rms_error: float = float("nan")     # fraction (0..1) over all Sij
     vf: object = None                   # the VectorFitting object
     messages: list = field(default_factory=list)
@@ -147,7 +150,7 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
         vf = _auto_fit(net, max_order, _span(report, 0.0, end_fit), notes)
         res.messages.extend(notes)
         if enforce_passivity:
-            vf, msgs, attempted = _enforce_passivity(
+            vf, msgs, attempted, res.passivity_path = _enforce_passivity_path(
                 vf, net, ceiling, _span(report, end_fit, _END_PASSIVITY))
             res.messages.extend(msgs)
         report(_END_PASSIVITY, "measuring the passivity margin")
@@ -387,6 +390,13 @@ def _enforce_at(vf, ceiling: float, n_samples: int):
 
 def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
                        report=null_progress):
+    """(vector_fitting, messages, attempted) of `_enforce_passivity_path`, without the path,
+    for callers that unpack three values."""
+    return _enforce_passivity_path(vf, net, ceiling, report)[:3]
+
+
+def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
+                            report=null_progress):
     """Bring the model's sigma_max down to `ceiling`, escalating effort only as needed,
     never shipping a worse model than the original fit.
 
@@ -405,20 +415,21 @@ def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
 
     Strategy adapted from the COBRA project (https://github.com/DI-PASSIONATE/COBRA).
 
-    Returns (vector_fitting, messages, attempted).  `attempted` is False only when the
+    Returns (vector_fitting, messages, attempted, path).  `attempted` is False only when the
     fit already sat below the ceiling and was handed straight back, and it is True on
     every path that ran the perturbation, including the near-passive one that ran it and
     kept the original anyway.  The caller reports the False case differently, because
     "nothing needed doing" is the answer to "why did my ceiling of 1.20 leave the model
     at 1.019", and the near-passive case must not borrow that wording: there the ceiling
-    was missed, not unneeded.
+    was missed, not unneeded.  `path` names the branch that produced the model: not needed,
+    perturbed, reduced order or near-passive.
     """
     import copy
     msgs = []
     report(0.0, "checking passivity")
     if _meets_ceiling(vf, None, ceiling):
         report(1.0, "already below the ceiling")
-        return vf, msgs, False   # nothing to do
+        return vf, msgs, False, "not needed"
 
     best = [None]                                  # [(rms, vf)] best usable candidate
     at = "" if ceiling <= PASSIVITY_CEILING_MIN else f" at {ceiling:.2f}"
@@ -444,7 +455,7 @@ def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
             msgs.append(f"passivity enforce failed: {exc}")
             break
         if keep_if_good(cand, f"n_samples={n_samples}"):
-            return best[0][1], msgs, True
+            return best[0][1], msgs, True, "perturbed"
 
     # last resort: a single lower-order refit (kept only if it clears the ceiling)
     poles = np.atleast_1d(vf.poles)
@@ -461,10 +472,10 @@ def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
         except Exception:                          # noqa: BLE001
             cand = None
         if cand is not None and keep_if_good(cand, f"reduced order ({k} cmplx)"):
-            return best[0][1], msgs, True
+            return best[0][1], msgs, True, "reduced order"
 
     msgs.append("passivity enforced (near-passive)")
-    return vf, msgs, True
+    return vf, msgs, True, "near-passive"
 
 
 def _is_passive(vf) -> bool:

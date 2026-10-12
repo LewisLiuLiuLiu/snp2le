@@ -142,7 +142,7 @@ pytest
   by 1/t, runs scikit-rf's standard perturbation, and scales back. At t = 1.0 both
   scalings are the identity, which is what keeps the strict path bit-for-bit what it
   was. A ceiling the residue perturbation cannot reach (an unbounded violation band,
-  from a non-passive constant term) leaves the accurate fit in place instead. scikit-rf's `passivity_enforce` writes only the residues (1.12 and 2.1.0 alike), so the constant term D, the model's value at infinite frequency, is out of its reach. `universal.constant_term_sigma()` measures D, and a final model whose D is above its ceiling gets a message that names D and the knob that is left, another Max order. 1.0 is
+  from a non-passive constant term) leaves the accurate fit in place instead. scikit-rf's `passivity_enforce` writes only the residues (1.12 and 2.1.0 alike), so the constant term D, the model's value at infinite frequency, is out of its reach. `universal.constant_term_sigma()` measures D, and a final model whose D is above its ceiling gets a message that names D and the knob that is left, another Max order. `Results.passivity_path` says which branch produced the model (`off`, `not needed`, `perturbed`, `reduced order` or `near-passive`, empty for a structure model), so a caller need not read it out of the messages. `universal._enforce_passivity()` keeps its three return values for callers outside snp2le, `_enforce_passivity_path()` adds the path. 1.0 is
   the floor because a lossless reciprocal network sits at exactly 1. An out-of-range
   number is clamped to the edge it overshot and a non-number falls back to the default
   (`universal.clamp_passivity_ceiling()`), so the GUI field answers "what is the limit"

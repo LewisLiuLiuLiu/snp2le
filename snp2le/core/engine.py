@@ -189,6 +189,7 @@ def _convert_universal(state, net, res, track):
     res.sigma_max = fit.sigma_max
     res.sigma_max_freq = fit.sigma_max_freq
     res.passivity_ceiling = fit.passivity_ceiling
+    res.passivity_path = fit.passivity_path
     res.rms_error = fit.rms_error
     res.messages = fit.messages
     res.model_s = _uni.model_sparams(fit.vf, net.f, progress=track.sub("model"))
