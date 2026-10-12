@@ -169,3 +169,19 @@ def test_the_displayed_rounding_never_crops_the_fit(win, top):
     _settle(win)
     assert win.state.f_min == float(win.net.f[0])      # the untouched side stays exact
     assert win._res.freq[0] == win.net.f[0]
+
+
+def test_the_dc_pin_box_reaches_the_state(win, top):
+    """Ticked by default, universal mode only, greyed for a structure, ticked again by
+    Reset, and a design that cleared it opens with it cleared."""
+    assert top.dc_pin.isChecked() and top.dc_pin.isEnabled()
+    top.dc_pin.setChecked(False)
+    win._pull()
+    assert win.state.dc_pin is False and top.values()["dc_pin"] is False
+    top.mode.setCurrentIndex(top.mode.findData("structure"))
+    assert not top.dc_pin.isEnabled()
+    win.on_reset()
+    _settle(win)
+    assert top.dc_pin.isChecked() and win.state.dc_pin is True
+    top.set_values(ConverterState(dc_pin=False))
+    assert not top.dc_pin.isChecked()

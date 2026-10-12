@@ -53,6 +53,13 @@ class ConverterState:
     # ports, computed from the fit (noise.py).  False keeps the model noiseless (ideal).
     # Structure models are unaffected, their resistors are real loss and always noisy.
     thermal_noise: bool = False
+    # Universal mode: pin the model to the file's 0 Hz sample with a low-pass correction below
+    # dc_pin_fc, so its DC admittance (a coil's DC resistance) is the file's, see dcpin.py.
+    # Only for a file with a finite 0 Hz sample.  dc_island_leak > 0 gives each DC mode without
+    # a path to ground that conductance [S], which can help harmonic balance converge.
+    dc_pin: bool = True
+    dc_pin_fc: float = 160.0
+    dc_island_leak: float = 0.0
     f_min: float | None = None            # fit band start [Hz], None = the data's first point
     f_max: float | None = None            # fit band stop  [Hz], None = the data's last point
     source_path: str = ""                 # last loaded .sNp (for save/restore)
@@ -99,6 +106,7 @@ class Results:
     passivity_path: str = ""
     dc: object = None                     # DCHealth: DC operating-point check (universal mode)
     noise: object = None                  # NoiseHealth when thermal noise was requested
+    dc_pin: object = None                 # DCPinHealth when the file's 0 Hz point was pinned to
     rms_error: float = float("nan")
     metrics: dict = field(default_factory=dict)
     value_rows: list = field(default_factory=list)   # (name, value, unit)

@@ -74,6 +74,7 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  │  │  └─ wilkinson.py
 │  │  ├─ __init__.py
 │  │  ├─ dc.py                DC operating-point (singularity) check
+│  │  ├─ dcpin.py             DC pin: a universal model meets the file's 0 Hz point
 │  │  ├─ engine.py            convert(state, net) -> Results, the entry point
 │  │  ├─ io.py                load Touchstone, parse Ngspice tables
 │  │  ├─ ir.py                dialect-agnostic Circuit IR
@@ -190,7 +191,7 @@ Naming a `.sNp` file on the command line opens the GUI on it instead of the exam
 
 1. **Load** a Touchstone `.sNp` file from the top bar, or name it on the command line (`snp2le design.s4p`, see above). The header shows the port count and frequency range.
 2. **Choose a mode.** Universal (set *Max order*, *Enforce passivity* and the *Passivity ceiling* it works towards, and tick *Thermal noise* for a model that carries the passive's noise) or Structure-specific (pick a structure and set the *extraction frequency*). Some structures expose an extra option such as *Stages*, *Isolation R* or *Resistive loss*. The wideband inductors have no extraction frequency and show their own options instead: *Basic model*, *Segments* (*Center tap* for the center-tapped one), *Peak-Q weight* and *Measured data*. *Max order* bounds the model order, `n_real + 2 x n_complex`, which is also the number of internal states in the netlist. The *Result* panel's *order* line reports the order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair counts once, so the two numbers differ by design.
-3. **Restrict the fit range** (optional, both modes). The *Fit range (GHz)* fields start at the loaded file's own span, so they always name the band being fitted. Enter two plain numbers in GHz (e.g. `110` and `170`) to fit only a sub-band. The *Result* panel shows the band actually fitted, and the RMS error, the tolerances, the plots and a testbench run's sweep all follow it. An edge outside the data is clamped to the data and reported, an empty or inverted band is refused.
+3. **Restrict the fit range** (optional, both modes). The *Fit range (GHz)* fields start at the loaded file's own span, so they always name the band being fitted. Enter two plain numbers in GHz (e.g. `110` and `170`) to fit only a sub-band. The *Result* panel shows the band actually fitted, and the RMS error, the tolerances, the plots and a testbench run's sweep all follow it. An edge outside the data is clamped to the data and reported, an empty or inverted band is refused. The **DC pin** tick box on the caption line (universal mode, ticked by default) makes the model meet a file's 0 Hz sample, see [The 0 Hz point](https://github.com/iic-jku/snp2le#the-0-hz-point).
 4. **Inspect** the result, element values, per-element **tolerances** at the extraction frequency, the drawn schematic, and the generated netlist in the **Design & Schematic** view.
 5. **Compare** the loaded data (grey) against the extracted model (blue) in the **Plot** view (up to four traces, magnitude and phase). The **View** switch at the right of the title bar carries both views side by side and fills the one you are on, so a click moves between them.
 6. **Export** the netlist. *Export Ngspice* writes a `.spice` file and *Export VACASK* writes an `.inc` file. The `.SUBCKT` is named after the file, so a testbench that instantiates it resolves the include.
@@ -238,6 +239,26 @@ The **Result** panel reports the measured sigma_max next to the ceiling it was j
 
 - **At 0 Hz or inside your band**: a real hazard. Enforce, or raise the order.
 - **Far above the top data point**, at 10^4 times it or so: that is the model's high-frequency asymptote, not a resonance. It usually means the fit order is too high for the file. The bundled `tline_100um_ihp-sg13g2.s2p` without enforcement reaches sigma_max = 5.24 at order 13 but only 0.9997 at order 6, for the same reason.
+
+### The 0 Hz point
+
+Some files carry a 0 Hz sample, an EM solver's DC point. The bundled `ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p` and `tline_100um_ihp-sg13g2.s2p` do. A vector fit drops it and extrapolates to DC from the samples above it, and a coil's DC resistance sits in a small departure of S21 from 1 (0.3 % for 0.3 ohm between two 50 ohm ports), so a fit error of 1e-3 in S moves it by tens of percent. On the bundled coil at order 13 the fit reads 1.29 ohm against the file's 1.096 ohm. On 20 ORCA EM inductors at order 20 the fit is 20 % off in the median and 157 % at worst. A coil in a bias or supply path then drops the wrong voltage.
+
+**DC pin** (the tick box on the *Fit range* caption line, CLI `--dc-pin`, on by default) makes the model meet the file's 0 Hz point:
+
+- It leaves the fit as it is and adds the difference at DC through a first-order low-pass: Y = Y<sub>fit</sub> + ΔY / (1 + s/ω<sub>c</sub>), with ΔY = Y<sub>dc</sub> - Y<sub>fit</sub>(0) and a corner of 160 Hz (CLI `--dc-pin-fc`). Per port a controlled source copies the port voltage onto a node loaded by 1 ohm and 1 mF, and one controlled source per nonzero entry of ΔY feeds the correction back into the port. The elements are `Gdcp_*`, `Rdcp_*` and `Cdcp_*`, and the resistors are noiseless.
+- At DC the model then is the file: the coil reads 1.0964 ohm at every order, solved as a circuit, and the ORCA inductors land on their 0 Hz point to 1e-9 in the median. Above the corner the correction fades as fc/f: the fitted band moves by 8e-9 on the coil and by at most 7e-7 on the ORCA files, whose data start at 1 GHz.
+- The 0 Hz point is taken real and symmetric, and its singular values are clipped below 1, since an EM solver's extrapolation can put them a hair above (the bundled line at 1.0001, ORCA files up to 1.0000173). That clip is what the pinned model meets, so the ORCA file at 1.0000173 reads 0.16 % off the unclipped point.
+- The pin is checked before it is kept. It is skipped, with a note saying why, if it would take a frequency where the fit is passive to sigma_max 1 or above (checked from 0.16 Hz up through the band), move the fitted band by more than the fit's own RMS error, or make the DC operating point singular. The last happens when the fit nearly shorts a port at DC, so that the correction would have to cancel a large conductance. The passivity result and the thermal-noise generator stay those of the fit.
+- It acts in universal mode on a file with a finite 0 Hz sample, also when the fit range starts above it. A file without one sees no change. Structure modes drop the 0 Hz point, since their extraction divides by the frequency, and the wideband inductors fit their DC resistance themselves.
+- `--dc-island-leak S` gives each DC mode without a path to ground (the common mode of a series coil, both terminals of a capacitor) that conductance, which can help a harmonic-balance run converge. It is 0 by default, so the model keeps the file's DC behaviour, 1e-10 S on the bundled coil's common mode.
+
+What it costs, below the corner the model is the pin's rather than the fit's:
+
+- In a transient run a bias step reaches its DC value with the time constant 1/(2π fc), 1 ms at 160 Hz. A higher `--dc-pin-fc` settles faster and moves the band more.
+- The thermal-noise generator carries the fit's loss, so below a few kHz the noise is that of the fit's DC conductance, not the file's.
+
+Untick **DC pin** (CLI `--no-dc-pin`) to leave the DC point to the fit. The refit in passivity enforcement (above) uses the 0 Hz point on its own, whichever way the box is set. Its copy of the point is clipped to sigma 1 - 1e-6, since a coil's open common mode sits at exactly 1 there, and a model that met it would be passive but not strictly, so it could not carry thermal noise.
 
 ### Thermal noise
 
@@ -370,6 +391,9 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--passive` / `--no-passive` | universal | enforce passivity (default on) |
 | `--passivity-ceiling SIGMA` | universal | sigma_max the enforcement works towards, `1.0` to `1.2`, needs `--passive` (default `1.0`) |
 | `--thermal-noise` / `--no-thermal-noise` | universal | add the passive's thermal noise, kT(I - S S<sup>H</sup>) at the ports, or emit the noiseless model (default noiseless). A model that is not strictly passive cannot carry it: nothing is written and the exit code is non-zero |
+| `--dc-pin` / `--no-dc-pin` | universal | pin the model to the file's 0 Hz sample, so its DC admittance (a coil's DC resistance) is the file's, or leave the DC point to the fit (default on, acts only on a file with a 0 Hz sample) |
+| `--dc-pin-fc FREQ` | universal | corner of the DC pin's low-pass, e.g. `1kHz` (default 160 Hz). Above it the band moves by about fc/f, below it the model is the pin's |
+| `--dc-island-leak S` | universal | conductance to ground for each DC mode without a DC path, which can help harmonic balance converge (default 0) |
 | `--fext FREQ` | structure | extraction frequency, e.g. `7GHz` (default 10 GHz). The wideband inductors have none |
 | `--fmin FREQ` | both | lowest frequency used for the fit (default: the file's first point) |
 | `--fmax FREQ` | both | highest frequency used for the fit (default: the file's last point) |
@@ -423,6 +447,10 @@ snp2le -b convert bpf.s2p --mode universal --order 13 --passivity-ceiling 1.05
 
 # add the passive's thermal noise to the macromodel, both dialects
 snp2le -b convert wpd.s3p --mode universal --order 13 --thermal-noise --format both
+
+# a file with a 0 Hz sample is pinned to it by default, so a coil keeps its DC resistance.
+# Here the DC modes without a path to ground also get 1 uS, for harmonic balance
+snp2le -b convert coil.s2p --mode universal --order 13 --dc-island-leak 1e-6
 
 # convert the BPF, run the 2-port Xschem testbench, and show data vs model vs sim plots
 snp2le -b convert snp2le/examples/bpf_ihp-sg13g2.s2p \

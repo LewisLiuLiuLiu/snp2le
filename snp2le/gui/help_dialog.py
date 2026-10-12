@@ -131,7 +131,16 @@ model that says nothing outside the band. An edge outside the data is clamped to
 and reported, an empty or inverted band is refused, and clearing a field leaves that side
 at the file's own edge. The band applies to everything downstream: the RMS error, the
 tolerances, the plots, and the sweep written into a testbench run. The <b>Result</b> panel
-shows the band actually fitted, highlighted while it is a sub-band.</li>
+shows the band actually fitted, highlighted while it is a sub-band.
+<p><b>DC pin</b>, the tick box on the caption line (universal mode, ticked by default): a
+file can carry a 0 Hz sample, which the fit drops and extrapolates to, so a coil's DC
+resistance comes out tens of percent off. The pin adds the difference at DC through a
+low-pass with a 160&nbsp;Hz corner, so the model meets the 0 Hz sample exactly while the
+fitted band moves by 1e-6 or less. It is checked first, and skipped with a note if it
+would cost passivity, move the band by more than the fit's error, or make the DC operating
+point singular. In a transient run a bias step settles with a 1&nbsp;ms time constant, and
+below a few kHz the thermal noise is the fit's. It acts only on a file with a 0 Hz sample,
+also below a fit range that starts above it.</p></li>
 <li><b>Model option</b> (shown only for the structure it belongs to):
   <ul>
   <li><b>Stages</b>: number of RLGC ladder cells for the transmission line (1 to 10).</li>
