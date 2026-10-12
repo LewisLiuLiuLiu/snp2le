@@ -296,6 +296,7 @@ class _RelocationLimit:
     def __init__(self, vf):
         self.count = 0
         self.poles = None
+        self._vf = None
         relocate = getattr(vf, "_pole_relocation", None)
         if relocate is None:
             return
@@ -307,6 +308,14 @@ class _RelocationLimit:
                 raise _AutoFitStuck
             return relocate(poles, *args, **kwargs)
         vf._pole_relocation = bounded
+        self._vf = vf
+
+    def release(self):
+        """Take the wrapper off again, so a caller who refits the returned model later is
+        not stopped by a count this fit left behind."""
+        if self._vf is not None:
+            vars(self._vf).pop("_pole_relocation", None)
+            self._vf = None
 
 
 def _refit_stuck(net, limit, report, notes):
@@ -363,6 +372,8 @@ def _auto_fit(net, max_order: int, report=null_progress, notes=None):
                 vf.auto_fit()
     except _AutoFitStuck:
         vf = _refit_stuck(net, limit, report, notes)
+    finally:
+        limit.release()
     report(1.0, "vector fitting done")
     return vf
 
