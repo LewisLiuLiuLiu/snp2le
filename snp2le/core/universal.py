@@ -183,6 +183,16 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
             res.messages.append(
                 f"{where}, {'below' if res.passive else 'ABOVE'} "
                 f"ceiling {ceiling:.2f}")
+    # A constant term above the ceiling is a violation band that runs to infinity, and the
+    # residue perturbation cannot move it, so say which knob is left.
+    sigma_d = constant_term_sigma(vf)
+    if sigma_d > ceiling:
+        res.messages.append(
+            f"the constant term D, the model's value at infinite frequency, has sigma "
+            f"{sigma_d:.3f}, and passivity enforcement cannot change D: "
+            + ("try another Max order" if enforce_passivity else
+               "enforcing passivity would have to refit at a lower order, so try another "
+               "Max order first"))
 
     report(_END_SCORING, "synthesising the subcircuit")
     import tempfile, os
@@ -481,6 +491,15 @@ def _meets_ceiling(vf, sigma_max, ceiling: float) -> bool:
     if sigma_max is None:
         sigma_max = max_singular_value(vf)[0]
     return bool(sigma_max == sigma_max and sigma_max <= ceiling)
+
+
+def constant_term_sigma(vf) -> float:
+    """Largest singular value of the fit's constant term D, its S-matrix at infinite
+    frequency.  Above 1 the model has a passivity violation band that runs to infinity, and
+    the residue perturbation of passivity enforcement cannot move it."""
+    d = np.real(np.asarray(vf.constant_coeff, dtype=complex))
+    n = int(round(np.sqrt(d.size)))
+    return float(np.linalg.svd(d.reshape(n, n), compute_uv=False)[0])
 
 
 def max_singular_value(vf):

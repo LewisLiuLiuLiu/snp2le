@@ -142,7 +142,7 @@ pytest
   by 1/t, runs scikit-rf's standard perturbation, and scales back. At t = 1.0 both
   scalings are the identity, which is what keeps the strict path bit-for-bit what it
   was. A ceiling the residue perturbation cannot reach (an unbounded violation band,
-  from a non-passive constant term) leaves the accurate fit in place instead. 1.0 is
+  from a non-passive constant term) leaves the accurate fit in place instead. scikit-rf's `passivity_enforce` writes only the residues (1.12 and 2.1.0 alike), so the constant term D, the model's value at infinite frequency, is out of its reach. `universal.constant_term_sigma()` measures D, and a final model whose D is above its ceiling gets a message that names D and the knob that is left, another Max order. 1.0 is
   the floor because a lossless reciprocal network sits at exactly 1. An out-of-range
   number is clamped to the edge it overshot and a non-number falls back to the default
   (`universal.clamp_passivity_ceiling()`), so the GUI field answers "what is the limit"
@@ -184,7 +184,7 @@ pytest
   added, V V^H is checked against I - S S^H on DC, the data band and four decades either
   side (`noise.CHECK_TOL`, 1e-6 kT). A model that is not strictly passive, has a
   proportional term or fails the check gets no generator, `Results.noise.ok` is False
-  with the reason, the engine adds that reason to `messages`, the GUI refuses Export
+  with the reason (naming D when min eig(I - D D^T) <= 0, since enforcement cannot fix that), the engine adds that reason to `messages`, the GUI refuses Export
   and the CLI writes nothing and exits non-zero. Any failed CLI conversion also removes the files an earlier run left at its output paths (`cli._remove_stale`), except those the same run wrote, so a Makefile cannot take a stale netlist for the result. Its notes go into `CircuitIR.notes`,
   which the renderers print in full after the provenance comments. `_PLAN_UNIVERSAL_NOISE`
   carries the extra stage, so the default plan's progress fractions are unchanged.
