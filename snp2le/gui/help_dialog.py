@@ -93,8 +93,8 @@ only as a diagnostic while you are looking at what the fit is doing.
 residues, so a violation band that runs to infinity, caused by a non-passive constant
 term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at order 13
 has its constant term at 5.24. A file that carries a 0 Hz point, as this one does, then
-also gets a refit that includes it, whose constant term is pinned to the DC point, and it
-is kept if it passes and fits closer than a lower-order refit (with scikit-rf 1.12 the line
+also gets a refit that includes it, which scikit-rf meets through the constant term, and
+it is kept if it passes and fits closer than a lower-order refit (with scikit-rf 1.12 the line
 comes out passive at model order 9 that way). When nothing reaches the ceiling, the
 accurate fit is kept rather than a wrecked one and the result reads <i>near-passive</i>.
 The fix is a lower <b>Max order</b>, not a higher ceiling, since order 6 brings the same

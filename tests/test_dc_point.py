@@ -1,11 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Simon Dorrer
 # SPDX-License-Identifier: Apache-2.0
-"""test_fit_dc.py - the 0 Hz point of a universal fit (no Qt).
+"""test_dc_point.py - the 0 Hz point of a universal fit (no Qt).
 
 A file can carry a 0 Hz sample, which the fit drops and extrapolates to.  Passivity
 enforcement tries a refit that includes it when residue perturbation cannot reach the ceiling,
-since that refit's constant term is pinned to the DC point instead of free to run past 1.
-Run with:  pytest -q
+as one more candidate next to the lower-order refit.  Run with:  pytest -q
 """
 import os
 import sys
@@ -41,8 +40,8 @@ def _convert(net, **kw):
 def test_a_refit_with_the_dc_point_rescues_a_runaway_constant_term():
     """The 500 pH coil at order 6 stays near-passive: its constant term D sits at 2.18,
     residue perturbation cannot move it, and the lower-order refit misses too.  Given a
-    0 Hz point, enforcement also tries a refit that includes it, whose D is pinned to the
-    DC point, and that one comes out strictly passive."""
+    0 Hz point, enforcement also tries a refit that includes it, which lands on another
+    model, and that one comes out strictly passive."""
     net = _example("ind_500pH_ihp-sg13cmos5l.s2p")
     plain = _convert(net, max_order=6)
     assert plain.passivity_path == "near-passive" and not plain.passive
@@ -50,6 +49,7 @@ def test_a_refit_with_the_dc_point_rescues_a_runaway_constant_term():
     assert res.ok and res.passive and res.passivity_path == "dc refit"
     assert res.sigma_max <= 1.0
     assert any("refit with the 0 Hz point" in m for m in res.messages)
+    assert not any("not needed" in m for m in res.messages)
 
 
 def test_the_refit_with_the_dc_point_only_runs_where_it_can_help():
@@ -79,3 +79,16 @@ def test_a_dc_point_above_passivity_is_made_passive():
     assert hot.s[0] is not fixed.s[0]                  # the caller's network is untouched
     plain, nan = io.passive_dc(_example("bpf_ihp-sg13g2.s2p"))
     assert nan != nan and plain.f[0] > 0
+
+
+def test_a_dc_point_that_is_not_finite_is_ignored():
+    """A 0 Hz row of NaN is dropped like any 0 Hz row and never refitted, so the result is
+    the one the file gives without it."""
+    net = _example("ind_500pH_ihp-sg13cmos5l.s2p")
+    bad = _with_dc_point(net)
+    bad.s[0] = np.nan
+    same, nan = io.passive_dc(bad)
+    assert same is bad and nan != nan
+    res = _convert(bad, max_order=6)
+    assert res.ok and res.passivity_path == "near-passive"
+    assert res.ngspice == _convert(net, max_order=6).ngspice

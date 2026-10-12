@@ -145,9 +145,11 @@ def _convert(state, net, progress=None) -> Results:
     res.data_s = net.s
 
     # The same band with the file's 0 Hz point still in it, for passivity enforcement to try
-    # a refit that includes it.  Only when the band starts at the bottom of the file.
+    # a refit that includes it.  Only when the band starts at the bottom of the file, and not
+    # for a 0 Hz row that is not finite, which the file then carries for nothing.
     dc_net = None
-    if state.mode != "structure" and len(loaded.f) and loaded.f[0] == 0 and not state.f_min:
+    if (state.mode != "structure" and len(loaded.f) and loaded.f[0] == 0 and not state.f_min
+            and np.all(np.isfinite(loaded.s[0]))):
         dc_net = _io.passive_dc(_io.restrict_band(loaded, None, state.f_max)[0])[0]
 
     try:

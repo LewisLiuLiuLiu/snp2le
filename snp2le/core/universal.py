@@ -284,7 +284,8 @@ _AUTO_FIT_INIT_ORDER = 3 + 2 * 3
 # Pole relocations one auto_fit may take before it counts as stuck.  scikit-rf's adding and
 # skimming loop has no pass limit, and on some EM data it alternates between two pole sets
 # for good (6 of 3,200 ORCA fits at model_order_max=20, scikit-rf issue 1452).  Converging
-# fits need 8 to 120, the bundled examples at most 26 (ind_d20 at order 10).
+# fits need 8 to 120, the bundled examples at most 26 (ind_d20 at order 10).  A fit that
+# includes tline_100um's 0 Hz point does cycle, at order 10.
 _AUTO_FIT_MAX_RELOCATIONS = 250
 
 
@@ -423,9 +424,11 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
        so perturbations do not compound.
     3. Last resorts: one lower-order refit (a smaller model is often easier to
        make passive, at some accuracy cost), and with `dc_net`, the band including the
-       file's 0 Hz point, a refit at `max_order` that includes it.  That refit's constant
-       term is pinned to the DC point instead of free to run past 1, the violation residue
-       perturbation cannot reach.  The closer of the two to the data wins.
+       file's 0 Hz point, a refit at `max_order` that includes it.  scikit-rf meets that
+       point through the constant term, so the refit lands on other poles and residues and
+       often clears the ceiling where the free fit's constant term ran past 1.  It does not
+       bound D in general, it is one more candidate.  The closer of the two to the data
+       wins.
     A candidate is kept only if it clears the ceiling *and* still resembles the data
     (`rms < _USABLE_RMS`).  Otherwise the accurate near-passive fit is returned.  That
     guard matters more at a raised ceiling, not less: a model whose violation band runs
@@ -450,20 +453,21 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
         report(1.0, "already below the ceiling")
         return vf, msgs, False, "not needed"
 
-    best = [None]                    # [(rms, vf, how, path)] best usable candidate
+    best = [None]            # [(rms, vf, how, path, notes)] best usable candidate
     at = "" if ceiling <= PASSIVITY_CEILING_MIN else f" at {ceiling:.2f}"
 
-    def keep_if_good(cand, how, path):
+    def keep_if_good(cand, how, path, notes=()):
         if not _meets_ceiling(cand, None, ceiling):
             return False
         r = _rms_error(cand, net)
         if r < _USABLE_RMS and (best[0] is None or r < best[0][0]):
-            best[0] = (r, cand, how, path)
+            best[0] = (r, cand, how, path, list(notes))
             return True
         return False
 
     def kept():
-        r, cand, how, path = best[0]
+        r, cand, how, path, notes = best[0]
+        msgs.extend(notes)
         msgs.append(f"passivity enforced{at} ({how}, rms={r:.2e})")
         return cand, msgs, True, path
 
@@ -500,13 +504,15 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
     if dc_net is not None:
         report((len(_PASSIVITY_N_SAMPLES) + 0.5) / (len(_PASSIVITY_N_SAMPLES) + 1),
                "refitting with the 0 Hz point")
+        notes = []
         try:
-            cand = _auto_fit(dc_net, max_order)
+            cand = _auto_fit(dc_net, max_order, notes=notes)
             cand, _, _, how = _enforce_passivity_path(cand, dc_net, ceiling)
         except Exception:                          # noqa: BLE001
             cand = None
         if cand is not None:
-            keep_if_good(cand, f"refit with the 0 Hz point, {how}", "dc refit")
+            how = "refit with the 0 Hz point" + ("" if how == "not needed" else f", {how}")
+            keep_if_good(cand, how, "dc refit", notes)
     if best[0] is not None:
         return kept()
 

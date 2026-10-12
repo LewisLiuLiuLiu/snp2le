@@ -58,8 +58,9 @@ def passive_dc(net: skrf.Network):
     reach sigma 1.0000036), and a fit that includes it inherits a non-passive DC: a negative
     DC conductance, which stops a harmonic-balance run.  Singular values of S(0) above 1
     are clipped to 1.  Every direction with loss, a coil's DC resistance included, keeps
-    its value.  A network without a 0 Hz point comes back as it is, with NaN."""
-    if net is None or len(net.f) == 0 or net.f[0] != 0:
+    its value.  A network without a 0 Hz point, or with one that is not finite, comes back
+    as it is, with NaN."""
+    if net is None or len(net.f) == 0 or net.f[0] != 0 or not np.all(np.isfinite(net.s[0])):
         return net, float("nan")
     u, sv, vh = np.linalg.svd(net.s[0])
     if sv[0] <= 1.0:
