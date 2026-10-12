@@ -127,7 +127,7 @@ def effective_ceiling(enforce_passivity: bool,
 
 def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
                   passivity_ceiling: float = PASSIVITY_CEILING_DEFAULT,
-                  progress=None, dc_net=None) -> FitResult:
+                  progress=None, dc_net=None, prefer_strict: bool = False) -> FitResult:
     """Vector-fit `net` and synthesise a lumped-element SPICE subcircuit.
 
     `passivity_ceiling` is the sigma_max the enforcement brings the model down to.  It
@@ -136,7 +136,8 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
 
     `dc_net` is the fitted band with the file's 0 Hz point still in it, when the file has
     one.  Passivity enforcement tries a refit of it when residue perturbation cannot reach
-    the ceiling, see `_enforce_passivity_path`.
+    the ceiling, see `_enforce_passivity_path`.  `prefer_strict` is set when thermal noise
+    is asked for, see there too.
 
     `progress` is an optional `cb(fraction, message)` covering this call alone, from 0
     (nothing fitted) to 1 (subcircuit parsed and scored)."""
@@ -156,7 +157,7 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
         if enforce_passivity:
             vf, msgs, attempted, res.passivity_path = _enforce_passivity_path(
                 vf, net, ceiling, _span(report, end_fit, _END_PASSIVITY), dc_net=dc_net,
-                max_order=max_order)
+                max_order=max_order, prefer_strict=prefer_strict)
             res.messages.extend(msgs)
         report(_END_PASSIVITY, "measuring the passivity margin")
         res.sigma_max, res.sigma_max_freq = max_singular_value(vf)
@@ -413,7 +414,8 @@ def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
 
 
 def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
-                            report=null_progress, dc_net=None, max_order=None):
+                            report=null_progress, dc_net=None, max_order=None,
+                            prefer_strict=False):
     """Bring the model's sigma_max down to `ceiling`, escalating effort only as needed,
     never shipping a worse model than the original fit.
 
@@ -428,7 +430,9 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
        point through the constant term, so the refit lands on other poles and residues and
        often clears the ceiling where the free fit's constant term ran past 1.  It does not
        bound D in general, it is one more candidate.  The closer of the two to the data
-       wins.
+       wins, except that with `prefer_strict` (thermal noise asked for) a strictly passive
+       candidate beats one that only meets a raised ceiling, since only it can carry the
+       noise generator.  `max_order` defaults to the fit's own model order.
     A candidate is kept only if it clears the ceiling *and* still resembles the data
     (`rms < _USABLE_RMS`).  Otherwise the accurate near-passive fit is returned.  That
     guard matters more at a raised ceiling, not less: a model whose violation band runs
@@ -453,20 +457,21 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
         report(1.0, "already below the ceiling")
         return vf, msgs, False, "not needed"
 
-    best = [None]            # [(rms, vf, how, path, notes)] best usable candidate
+    best = [None]            # [((not strict, rms), vf, how, path, notes)] best usable candidate
     at = "" if ceiling <= PASSIVITY_CEILING_MIN else f" at {ceiling:.2f}"
 
     def keep_if_good(cand, how, path, notes=()):
         if not _meets_ceiling(cand, None, ceiling):
             return False
         r = _rms_error(cand, net)
-        if r < _USABLE_RMS and (best[0] is None or r < best[0][0]):
-            best[0] = (r, cand, how, path, list(notes))
+        rank = (bool(prefer_strict and not _is_passive(cand)), r)
+        if r < _USABLE_RMS and (best[0] is None or rank < best[0][0]):
+            best[0] = (rank, cand, how, path, list(notes))
             return True
         return False
 
     def kept():
-        r, cand, how, path, notes = best[0]
+        (_, r), cand, how, path, notes = best[0]
         msgs.extend(notes)
         msgs.append(f"passivity enforced{at} ({how}, rms={r:.2e})")
         return cand, msgs, True, path
@@ -502,12 +507,18 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
             keep_if_good(cand, f"reduced order ({k} cmplx)", "reduced order")
     # and a refit that includes the 0 Hz point, enforced the same way
     if dc_net is not None:
-        report((len(_PASSIVITY_N_SAMPLES) + 0.5) / (len(_PASSIVITY_N_SAMPLES) + 1),
-               "refitting with the 0 Hz point")
+        n = len(_PASSIVITY_N_SAMPLES)
+        report((n + 0.5) / (n + 1), "refitting with the 0 Hz point")
+        if max_order is None:
+            max_order = int(np.count_nonzero(poles.imag == 0)
+                            + 2 * np.count_nonzero(poles.imag != 0))
         notes = []
         try:
-            cand = _auto_fit(dc_net, max_order, notes=notes)
-            cand, _, _, how = _enforce_passivity_path(cand, dc_net, ceiling)
+            cand = _auto_fit(dc_net, max_order, _span(report, (n + 0.5) / (n + 1),
+                                                      (n + 0.8) / (n + 1)), notes)
+            cand, _, _, how = _enforce_passivity_path(
+                cand, dc_net, ceiling, _span(report, (n + 0.8) / (n + 1), (n + 0.95) / (n + 1)),
+                prefer_strict=prefer_strict)
         except Exception:                          # noqa: BLE001
             cand = None
         if cand is not None:

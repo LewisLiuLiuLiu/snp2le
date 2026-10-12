@@ -94,8 +94,9 @@ residues, so a violation band that runs to infinity, caused by a non-passive con
 term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at order 13
 has its constant term at 5.24. A file that carries a 0 Hz point, as this one does, then
 also gets a refit that includes it, which scikit-rf meets through the constant term, and
-it is kept if it passes and fits closer than a lower-order refit (with scikit-rf 1.12 the line
-comes out passive at model order 9 that way). When nothing reaches the ceiling, the
+it is kept if it passes and fits closer than a lower-order refit (the line comes out passive
+at model order 9 that way). With <b>Thermal noise</b> ticked, a strictly passive candidate wins
+over one that only meets a raised ceiling, since only it can carry the noise. When nothing reaches the ceiling, the
 accurate fit is kept rather than a wrecked one and the result reads <i>near-passive</i>.
 The fix is a lower <b>Max order</b>, not a higher ceiling, since order 6 brings the same
 file to 0.9997. Whenever the constant term D,
@@ -136,9 +137,9 @@ shows the band actually fitted, highlighted while it is a sub-band.
 file can carry a 0 Hz sample, which the fit drops and extrapolates to, so a coil's DC
 resistance comes out tens of percent off. The pin adds the difference at DC through a
 low-pass with a 160&nbsp;Hz corner, so the model meets the 0 Hz sample exactly while the
-fitted band moves by 1e-6 or less. It is checked first, and skipped with a note if it
-would cost passivity, move the band by more than the fit's error, or make the DC operating
-point singular. In a transient run a bias step settles with a 1&nbsp;ms time constant, and
+fitted band moves by less than the fit's own error. It is checked first, and skipped with a
+note if it would cost passivity, move the band by more than the fit's error, or make the DC
+operating point singular. In a transient run a bias step settles on a 1&nbsp;ms scale, and
 below a few kHz the thermal noise is the fit's. It acts only on a file with a 0 Hz sample,
 also below a fit range that starts above it.</p></li>
 <li><b>Model option</b> (shown only for the structure it belongs to):

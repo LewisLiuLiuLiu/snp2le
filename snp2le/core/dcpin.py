@@ -10,12 +10,12 @@ as it is and adds the difference at DC through a first-order low-pass:
     Y(s) = Y_fit(s) + dY / (1 + s / wc),    dY = Y_dc - Y_fit(0),
 
 so the model meets the file's DC admittance exactly and moves by about |dY| fc / f well above
-the corner fc.  Per port j a VCCS of gain 1 copies V(p_j) into a node d_j loaded by 1 ohm and
-1/wc farad, and per nonzero dY_ij a VCCS from p_i to ground reads V(d_j).  Its resistor is
-noiseless, since the correction models no loss.
+the corner fc.  Per port j a VCCS copies V(p_j) into a node d_j loaded by 1 ohm and 1/wc farad,
+and per nonzero dY_ij a VCCS from p_i to ground reads V(d_j).  Its resistor only sets the
+low-pass and is noiseless.
 
-The target is the file's S(0) made real and symmetric, with singular values clipped to
-1 - _EPS, since an EM solver's extrapolated DC point can come out a hair above passivity.
+The target is the file's S(0) made real and symmetric, with its eigenvalues clipped to
++-DC_SIGMA, since an EM solver's extrapolated DC point can come out a hair above passivity.
 Below a few kHz Y_fit(jw) is close to Y_fit(0), so the real part of the pinned Y is close to a
 convex combination of the fit's and the target's DC conductance, both passive.  That is no
 proof at every frequency, so the pinned model is checked on a grid, and the pin is skipped if
@@ -28,12 +28,20 @@ import numpy as np
 
 from .ir import Element
 
-FC_DEFAULT = 160.0          # corner of the low-pass [Hz]
-# Singular values of the target are clipped to 1 - _EPS.  A mode with no DC path (the common
-# mode of a series coil) then keeps a conductance of _EPS / (2 z0), 1e-11 S at 50 ohm.
-_EPS = 1e-9
-# A DC mode below this conductance has no DC path to ground, and gets the optional leak.
-_ISLAND = 1e-9
+# Largest singular value of the 0 Hz point the pin aims at, and that the refit in passivity
+# enforcement fits (engine.py).  A coil's open common mode sits at exactly 1 there, and a
+# model that met it would be passive but not strictly, so it could not carry thermal noise
+# (5 of 20 ORCA coils at order 40 lost it to the refit).  A mode with no DC path keeps
+# (1 - DC_SIGMA) / (2 z0), 1e-8 S at 50 ohm.
+DC_SIGMA = 1.0 - 1e-6
+# Gain of the copy sources, the read gains scaled up by its inverse.  VACASK, which does not
+# scale its matrix, solved the pinned coil 1e-7 off at 1 THz with a gain of 1 (a 3-port ORCA
+# coil 2e-7), and all seven cases tried to 1e-15 with gains from 1e-4 to 1e-9.  Ngspice is
+# exact either way.
+_COPY = 1e-6
+# A DC mode below this many times the clip's floor, (1 - DC_SIGMA) / (2 z0), has no DC path to
+# ground and gets the optional leak: 1e-7 S at 50 ohm.
+_ISLAND = 10.0
 # dY entries below this fraction of the largest target entry are dropped.
 _ZERO = 1e-12
 # Check grid below the band: log-spaced from this many decades under the corner.
@@ -54,7 +62,7 @@ class DCPinHealth:
     dy_max: float = float("nan")        # largest |dY| entry [S]
     sigma_dc: float = float("nan")      # sigma_max of the file's S(0) before clipping
     n_islands: int = 0                  # DC modes without a DC path to ground
-    n_sources: int = 0                  # controlled sources added
+    n_sources: int = 0                  # controlled sources in the netlist, 0 when skipped
 
 
 def _y_from_s(s, rz):
@@ -70,25 +78,28 @@ def _y_from_s(s, rz):
 
 
 def dc_target(s0, rz, leak=0.0):
-    """(Y_dc, sigma_dc, n_islands) of the file's 0 Hz S-matrix `s0`.
+    """(Y_dc, sigma_dc, n_islands, n_shorts, made_real) of the file's 0 Hz S-matrix `s0`.
 
-    The S-matrix is made real and symmetric and its singular values are clipped to
-    1 - _EPS before the conversion.  With `leak` > 0, each DC mode below _ISLAND gets that
-    conductance to ground, through the projector on its eigenvector."""
+    The S-matrix is made real and symmetric (`made_real` is how far that moved it) and its
+    eigenvalues are clipped to +-DC_SIGMA before the conversion.  `n_shorts` counts modes at
+    -DC_SIGMA or below, ports shorted at DC, which no finite conductance meets.  With `leak`
+    above 0, each DC mode without a DC path (see _ISLAND) gets that conductance to ground,
+    through the projector on its eigenvector."""
     s0 = np.asarray(s0)
     sigma = float(np.linalg.svd(s0, compute_uv=False)[0])
-    s = np.real(s0)
-    lam, q = np.linalg.eigh(0.5 * (s + s.T))
-    lam = np.clip(lam, -(1.0 - _EPS), 1.0 - _EPS)
+    s = 0.5 * (np.real(s0) + np.real(s0).T)
+    made_real = float(np.max(np.abs(s0 - s)))
+    lam, q = np.linalg.eigh(s)
+    n_shorts = int(np.count_nonzero(lam <= -DC_SIGMA))
+    lam = np.clip(lam, -DC_SIGMA, DC_SIGMA)
     y = _y_from_s((q * lam) @ q.T, rz)
-    if y is None:
-        return None, sigma, 0
     y = 0.5 * (y + y.T)
     g, v = np.linalg.eigh(y)
-    isl = v[:, g < _ISLAND]
+    floor = (1.0 - DC_SIGMA) / ((1.0 + DC_SIGMA) * float(np.min(rz)))
+    isl = v[:, g < _ISLAND * floor]
     if leak > 0 and isl.shape[1]:
         y = y + leak * isl @ isl.T
-    return y, sigma, int(isl.shape[1])
+    return y, sigma, int(isl.shape[1]), n_shorts, made_real
 
 
 def pinned_sparams(s_fit, f, dy, rz, fc):
@@ -114,14 +125,15 @@ def pin_elements(ports, dy, fc, ground="0"):
     cols = [j for j in range(len(ports)) if np.any(dy[:, j] != 0.0)]
     for j in cols:
         d = f"{_TAG}_d{j + 1}"
-        els.append(Element("G", f"G{_TAG}_v{j + 1}", (ground, d), 1.0, ctrl=(ports[j], ground)))
+        els.append(Element("G", f"G{_TAG}_v{j + 1}", (ground, d), _COPY,
+                           ctrl=(ports[j], ground)))
         els.append(Element("R", f"R{_TAG}_{j + 1}", (d, ground), 1.0, noisy=False))
         els.append(Element("C", f"C{_TAG}_{j + 1}", (d, ground), 1.0 / (2.0 * np.pi * fc)))
     for i in range(len(ports)):
         for j in cols:
             if dy[i, j] != 0.0:
                 els.append(Element("G", f"G{_TAG}_y{i + 1}_{j + 1}", (ports[i], ground),
-                                   float(dy[i, j]), ctrl=(f"{_TAG}_d{j + 1}", ground)))
+                                   float(dy[i, j]) / _COPY, ctrl=(f"{_TAG}_d{j + 1}", ground)))
     return els
 
 
@@ -129,7 +141,7 @@ def _sigma(s):
     return np.linalg.svd(s, compute_uv=False)[..., 0]
 
 
-def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc=FC_DEFAULT, leak=0.0):
+def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
     """Pin the realisation `ir` of the fit `vf` to the 0 Hz S-matrix `s0`, in place.
 
     `rz` are the real port reference resistances, `freq` and `model_s` the fitted band and
@@ -144,18 +156,21 @@ def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc=FC_DEFAULT, leak=0.0):
     except (TypeError, ValueError):
         fc = leak = float("nan")
     if not (np.isfinite(fc) and fc > 0):
-        return DCPinHealth(False, skip + "the corner frequency must be above 0 Hz"), model_s
+        return (DCPinHealth(False, skip + "the corner frequency must be finite and above 0 Hz"),
+                model_s)
     if not (np.isfinite(leak) and leak >= 0):
         return DCPinHealth(False, skip + "the leak must be 0 S or more"), model_s
     if any(n.startswith(_TAG + "_") for e in ir.elements for n in e.nodes):
         return DCPinHealth(False, skip + f"the netlist already uses '{_TAG}_' node names"), model_s
     rz = np.asarray(rz, dtype=float)
-    y_dc, sigma_dc, n_isl = dc_target(s0, rz, leak)
+    y_dc, sigma_dc, n_isl, n_shorts, made_real = dc_target(s0, rz, leak)
     s_fit0 = np.real(model_sparams(vf, [0.0])[0])
     y_fit0 = _y_from_s(s_fit0, rz)
-    if y_dc is None or y_fit0 is None:
-        return DCPinHealth(False, skip + "a port is shorted at DC, in the file or in the fit",
-                           fc=fc, sigma_dc=sigma_dc, n_islands=n_isl), model_s
+    if n_shorts or y_fit0 is None:
+        where = "the file's 0 Hz point" if n_shorts else "the fit"
+        return DCPinHealth(False, skip + f"{where} shorts a port at DC, which no finite "
+                                         f"conductance meets", fc=fc, sigma_dc=sigma_dc,
+                           n_islands=n_isl), model_s
     dy = y_dc - y_fit0
     dy[np.abs(dy) < _ZERO * max(1.0, float(np.max(np.abs(y_dc))))] = 0.0
     health = DCPinHealth(False, "", fc=fc, dy_max=float(np.max(np.abs(dy))),
@@ -179,7 +194,7 @@ def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc=FC_DEFAULT, leak=0.0):
     if not health.rf_change <= rms:
         health.message = (skip + f"it would move the fitted band by {health.rf_change:.1e}, "
                                  f"more than the fit's RMS error {rms:.1e}. A lower corner "
-                                 f"frequency moves it less")
+                                 f"frequency (CLI --dc-pin-fc) moves it less")
         return health, model_s
     all_f = np.concatenate((grid, freq))
     sig_fit = np.concatenate((_sigma(s_grid), _sigma(model_s)))
@@ -200,6 +215,9 @@ def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc=FC_DEFAULT, leak=0.0):
         f"DC pin: Y = Y_fit + dY / (1 + s/wc), fc = {fc:g} Hz, so the model meets the file's "
         f"0 Hz point. Nodes {_TAG}_d*, controlled sources G{_TAG}_*, noiseless"]
     extra = []
+    if made_real > 1e-6:
+        extra.append(f"the file's 0 Hz point was made real and symmetric, a change of "
+                     f"{made_real:.1e}")
     if sigma_dc > 1.0:
         extra.append(f"the file's 0 Hz point had sigma_max {sigma_dc:.7f} and was clipped "
                      f"below 1")

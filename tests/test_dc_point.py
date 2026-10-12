@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np                                   # noqa: E402
 import skrf                                          # noqa: E402
 
-from snp2le.core import io, engine, dcpin            # noqa: E402
+from snp2le.core import io, engine, dcpin, universal  # noqa: E402
 from snp2le.core.state import ConverterState         # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -130,12 +130,13 @@ def test_the_refit_stays_strictly_passive_so_it_can_carry_noise():
 
 def test_the_pin_gives_the_coil_its_dc_resistance():
     """The bundled coil's file reads 1.0964 ohm at 0 Hz, its fit at order 13 1.29 ohm.  The
-    pinned netlist, solved as a circuit, reads the file's value."""
+    pinned netlist, solved as a circuit, reads the file's value, to the 5e-9 the clip below
+    sigma 1 adds through the common mode."""
     net = _example(_COIL)
     want = _r_dc(np.real(net.s[0]))
     res = _convert(net, max_order=13)
     assert res.dc_pin.ok and res.dc_pin.n_sources == 6, res.dc_pin.message
-    assert abs(_r_dc(np.real(_port_noise(res.ir, 0.0)[1])) / want - 1.0) < 1e-9
+    assert abs(_r_dc(np.real(_port_noise(res.ir, 0.0)[1])) / want - 1.0) < 1e-7
     plain = _convert(net, max_order=13, dc_pin=False)
     assert plain.dc_pin is None
     assert _r_dc(np.real(_port_noise(plain.ir, 0.0)[1])) > 1.15 * want
@@ -159,7 +160,7 @@ def test_the_pin_leaves_the_band_and_the_noise_alone():
         assert [ln for ln in a.splitlines() if ln not in added] == b.splitlines()
         assert added and all("dcp" in ln for ln in added)
     assert "Rdcp_1 dcp_d1 0 1.0 noisy=0" in on.ngspice
-    assert "Gdcp_v1 (GND dcp_d1 p1 GND) vccs gain=1.0" in on.vacask
+    assert "Gdcp_v1 (GND dcp_d1 p1 GND) vccs gain=1e-06" in on.vacask
 
 
 def test_the_pin_only_acts_on_a_universal_fit_of_a_file_with_a_0_hz_point():
@@ -178,7 +179,7 @@ def test_the_pin_uses_the_0_hz_point_below_a_fit_range():
     net = _example(_COIL)
     res = _convert(net, max_order=13, f_min=float(net.f[5]))
     assert res.band_limited and res.dc_pin.ok
-    assert abs(_r_dc(np.real(_port_noise(res.ir, 0.0)[1])) / _r_dc(np.real(net.s[0])) - 1) < 1e-9
+    assert abs(_r_dc(np.real(_port_noise(res.ir, 0.0)[1])) / _r_dc(np.real(net.s[0])) - 1) < 1e-7
 
 
 def test_a_pin_that_would_make_the_dc_point_singular_comes_back_out():
@@ -188,16 +189,18 @@ def test_a_pin_that_would_make_the_dc_point_singular_comes_back_out():
     net = _with_dc_point(_example("wpd_ihp-sg13g2.s3p"))
     res = _convert(net, max_order=6)
     assert not res.dc_pin.ok and "singular" in res.dc_pin.message
+    assert res.dc_pin.n_sources == 0
     assert res.dc.ok and res.ngspice == _convert(net, max_order=6, dc_pin=False).ngspice
 
 
 def test_the_island_leak_reaches_only_the_floating_mode():
-    """The coil's common mode has no DC path.  Without a leak it keeps the file's 1e-10 S,
-    and with one it gets that conductance on top.  The DC resistance stays."""
+    """The coil's common mode has no DC path.  Without a leak it keeps 1e-8 S, the clip of
+    the file's point below sigma 1, and with one it gets that conductance on top.  The DC
+    resistance stays."""
     net = _example(_COIL)
     want = _r_dc(np.real(net.s[0]))
     g_file = np.linalg.eigvalsh(dcpin.dc_target(net.s[0], np.full(2, 50.0))[0])[0]
-    assert 0 < g_file < 1e-9
+    assert abs(g_file / 1e-8 - 1.0) < 1e-3
     for leak in (0.0, 1e-6):
         g_cm = g_file + leak
         res = _convert(net, max_order=13, dc_island_leak=leak)
@@ -266,3 +269,86 @@ def test_cli_writes_the_pinned_netlist(tmp_path, capsys):
     assert cli.main(["convert", src, "--mode", "structure", "--dc-pin-fc", "1k", "-o",
                      str(tmp_path / "s.spice"), "--quiet"]) == 0
     assert "--dc-pin-fc ignored in structure mode" in capsys.readouterr().err
+
+
+def test_with_thermal_noise_a_strictly_passive_candidate_wins(monkeypatch):
+    """At a raised ceiling the refit with the 0 Hz point can land just above sigma 1, where
+    it cannot carry thermal noise, while the lower-order refit is strictly passive (two ORCA
+    coils at ceiling 1.05).  With thermal noise asked for, the strictly passive one wins.
+    No bundled file has both candidates, so the perturbation is made to fail, both refits
+    to pass, and the one with the 0 Hz point to be the closer but not strictly passive."""
+    net = _example(_COIL)
+    band = io.without_dc(net)
+    dc_net = io.passive_dc(net, ceiling=dcpin.DC_SIGMA)[0]
+    vf0 = universal._auto_fit(band, 10)
+
+    def with_dc(vf):
+        return vf.network.f[0] == 0
+
+    def fail(*a, **k):
+        raise RuntimeError("no perturbation")
+    monkeypatch.setattr(universal, "_meets_ceiling", lambda vf, s, c: vf is not vf0)
+    monkeypatch.setattr(universal, "_enforce_at", fail)
+    monkeypatch.setattr(universal, "_is_passive", lambda vf: not with_dc(vf))
+    monkeypatch.setattr(universal, "_rms_error", lambda vf, n: 1e-4 if with_dc(vf) else 1e-3)
+    for strict, path in ((False, "dc refit"), (True, "reduced order")):
+        got = universal._enforce_passivity_path(vf0, band, 1.05, dc_net=dc_net, max_order=10,
+                                                prefer_strict=strict)
+        assert got[3] == path
+
+
+def test_the_refit_needs_no_max_order():
+    """A library caller that hands in the 0 Hz band without max_order gets the refit at the
+    fit's own model order, where it used to be skipped without a word."""
+    net = _with_dc_point(_example("ind_500pH_ihp-sg13cmos5l.s2p"))
+    band = io.without_dc(net)
+    vf0 = universal._auto_fit(band, 6)
+    got = universal._enforce_passivity_path(vf0, band, dc_net=io.passive_dc(
+        net, ceiling=dcpin.DC_SIGMA)[0])
+    assert got[3] == "dc refit"
+
+
+def test_the_refit_runs_when_the_fit_range_starts_at_the_first_sample():
+    """A fit range from the file's first sample above 0 Hz fits the same band, so it keeps
+    the refit.  One that starts higher leaves no 0 Hz point next to its band."""
+    coil = _with_dc_point(_example("ind_500pH_ihp-sg13cmos5l.s2p"))
+    assert _convert(coil, max_order=6, f_min=float(coil.f[1])).passivity_path == "dc refit"
+    assert _convert(coil, max_order=6, f_min=float(coil.f[2])).passivity_path == "near-passive"
+
+
+def test_the_refit_reports_its_progress():
+    """The refit and its enforcement report on their own share of the bar, rather than
+    holding it at one value for the whole refit."""
+    trace = []
+    engine.convert(ConverterState(max_order=13), _example("tline_100um_ihp-sg13g2.s2p"),
+                   progress=lambda f, m: trace.append((f, m)))
+    fractions = [f for f, _ in trace]
+    assert fractions == sorted(fractions)
+    k = next(i for i, (_, m) in enumerate(trace) if m == "refitting with the 0 Hz point")
+    assert any(m == "checking passivity" and f > trace[k][0] for f, m in trace[k:])
+
+
+def test_a_file_shorted_at_dc_is_named():
+    """A port shorted at DC needs an infinite conductance.  The note says so instead of
+    reporting the band move such a pin would cost."""
+    net = _example(_COIL)
+    net.s[0] = -np.eye(2)
+    res = _convert(net, max_order=13)
+    assert not res.dc_pin.ok and "the file's 0 Hz point shorts a port at DC" in res.dc_pin.message
+    assert "dcp" not in res.ngspice
+
+
+def test_a_0_hz_point_made_symmetric_is_reported():
+    net = _example(_COIL)
+    net.s[0, 0, 1] += 0.01
+    res = _convert(net, max_order=13)
+    assert res.dc_pin.ok and "made real and symmetric, a change of 5.0e-03" in res.dc_pin.message
+
+
+def test_cli_warns_when_the_pin_options_meet_no_0_hz_point(tmp_path, capsys):
+    from snp2le import cli
+    src = os.path.join(_EXAMPLES, "bpf_ihp-sg13g2.s2p")
+    assert cli.main(["convert", src, "--dc-pin", "--dc-pin-fc", "1k", "-o",
+                     str(tmp_path / "b.spice"), "--quiet"]) == 0
+    assert "--dc-pin, --dc-pin-fc ignored, the file has no finite 0 Hz sample" in \
+        capsys.readouterr().err

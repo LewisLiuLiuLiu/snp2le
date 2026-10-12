@@ -357,7 +357,7 @@ class TopBar(QtWidgets.QWidget):
             "Universal mode, a file with a 0 Hz sample: pin the model to it.\n"
             "A correction below 160 Hz makes the model's DC admittance the file's,\n"
             "a coil's DC resistance included, where the fit alone extrapolates to it.\n"
-            "The fitted band moves by 1e-6 or less.\n"
+            "It moves the fitted band by less than the fit's own error.\n"
             "Untick to leave the DC point to the fit.")
         band_lab = QtWidgets.QLabel("Fit range (GHz)"); band_lab.setProperty("class", "fieldLabel")
         caption = QtWidgets.QWidget()

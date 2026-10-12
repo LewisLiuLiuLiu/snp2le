@@ -24,6 +24,7 @@ from .state import Results
 from .progress import StageTracker
 from .process_state import ProcessSetting
 from . import netlist as _nl
+from . import dcpin as _pin
 from . import universal as _uni
 from . import mna as _mna
 from .structures import STRUCTURES, get_structure
@@ -65,12 +66,6 @@ _PLAN_STRUCTURE_WIDEBAND = (
     ("traces",   1, "building the extra traces"),
     ("netlist",  1, "rendering the netlists"),
 )
-
-
-# The refit meets its 0 Hz point, and a coil's open common mode is a sigma of exactly 1 there,
-# which leaves the model passive but not strictly, so it cannot carry thermal noise (5 ORCA
-# coils at order 40 lost it).  1e-6 below is 1e-8 S at 50 ohm.
-_DC_REFIT_SIGMA = 1.0 - 1e-6
 
 
 def _is_wideband(key) -> bool:
@@ -151,13 +146,14 @@ def _convert(state, net, progress=None) -> Results:
     res.data_s = net.s
 
     # The same band with the file's 0 Hz point still in it, for passivity enforcement to try
-    # a refit that includes it.  Only when the band starts at the bottom of the file, and not
-    # for a 0 Hz row that is not finite, which the file then carries for nothing.
+    # a refit that includes it.  Only when the band starts at the file's first sample above
+    # 0 Hz, and not for a 0 Hz row that is not finite, which the file then carries for nothing.
     dc_net = None
     has_dc = bool(len(loaded.f) and loaded.f[0] == 0 and np.all(np.isfinite(loaded.s[0])))
-    if state.mode != "structure" and has_dc and not state.f_min:
+    if (state.mode != "structure" and has_dc and len(net.f) and n_file
+            and net.f[0] == f_file_lo):
         dc_net = _io.passive_dc(_io.restrict_band(loaded, None, state.f_max)[0],
-                                ceiling=_DC_REFIT_SIGMA)[0]
+                                ceiling=_pin.DC_SIGMA)[0]
     # the file's 0 Hz S-matrix, which the DC pin makes the model meet
     dc_s = loaded.s[0] if state.mode != "structure" and state.dc_pin and has_dc else None
 
@@ -198,7 +194,8 @@ def _convert_universal(state, net, res, track, dc_net=None, dc_s=None):
     fit = _uni.fit_universal(net, max_order=state.max_order,
                              enforce_passivity=state.enforce_passivity,
                              passivity_ceiling=state.passivity_ceiling,
-                             progress=track.sub("fit"), dc_net=dc_net)
+                             progress=track.sub("fit"), dc_net=dc_net,
+                             prefer_strict=state.thermal_noise)
     res.ir = fit.ir
     res.physical = False
     res.n_poles = fit.n_poles
@@ -238,7 +235,6 @@ def _pin_dc(state, net, res, fit, dc_s, z0):
     A fit that nearly shorts a port at DC needs a correction that cancels a large conductance,
     which can leave the DC matrix singular, so then the pin comes back out."""
     from . import dc as _dc
-    from . import dcpin as _pin
     plain = (list(res.ir.elements), list(res.ir.notes), res.model_s)
     res.dc_pin, res.model_s = _pin.add_dc_pin(
         res.ir, fit.vf, dc_s, np.real(np.asarray(net.z0)[0]), net.f, res.model_s,
@@ -251,6 +247,7 @@ def _pin_dc(state, net, res, fit, dc_s, z0):
         if plain_dc.ok:
             res.dc = plain_dc
             res.dc_pin.ok = False
+            res.dc_pin.n_sources = 0
             res.dc_pin.message = (f"DC pin skipped: it would make the DC operating point "
                                   f"singular, since the fit nearly shorts a port at DC and the "
                                   f"correction has to cancel up to {res.dc_pin.dy_max:.2g} S")

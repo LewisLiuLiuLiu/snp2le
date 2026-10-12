@@ -613,6 +613,10 @@ def cmd_convert(args):
             print(f"[WARN] {src}: DC operating point may be singular "
                   f"(margin {res.dc.margin:.0e}); try a lower --order or --passive",
                   file=sys.stderr)
+        if (pin_given and args.dc_pin is not False and res.mode == "universal"
+                and res.dc_pin is None):
+            print(f"[WARN] {src}: {', '.join(pin_given)} ignored, the file has no finite 0 Hz "
+                  f"sample", file=sys.stderr)
         if not args.quiet:
             for m in res.messages:
                 print(f"       note: {m}")
