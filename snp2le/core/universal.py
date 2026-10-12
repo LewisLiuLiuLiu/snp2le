@@ -143,7 +143,9 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
     # worker, so the whole application is muted while a fit runs.  See doc/architecture.md,
     # "Notes / limitations".
     with _QUIET.held():
-        vf = _auto_fit(net, max_order, _span(report, 0.0, end_fit))
+        notes = []
+        vf = _auto_fit(net, max_order, _span(report, 0.0, end_fit), notes)
+        res.messages.extend(notes)
         if enforce_passivity:
             vf, msgs, attempted = _enforce_passivity(
                 vf, net, ceiling, _span(report, end_fit, _END_PASSIVITY))
@@ -261,8 +263,58 @@ def _fit_watch(vf, report):
 # its API, and a mismatch here only costs the clamp below, never correctness.
 _AUTO_FIT_INIT_ORDER = 3 + 2 * 3
 
+# Pole relocations one auto_fit may take before it counts as stuck.  scikit-rf's adding and
+# skimming loop has no pass limit, and on some EM data it alternates between two pole sets
+# for good (6 of 3,200 ORCA fits at model_order_max=20, scikit-rf issue 1452).  Converging
+# fits need 20 to 120, the bundled examples at most 20.
+_AUTO_FIT_MAX_RELOCATIONS = 250
 
-def _auto_fit(net, max_order: int, report=null_progress):
+
+class _AutoFitStuck(Exception):
+    """auto_fit went past _AUTO_FIT_MAX_RELOCATIONS pole relocations."""
+
+
+class _RelocationLimit:
+    """Counts the pole relocations of one fit and stops it past the limit, keeping the pole
+    set it was at.  Set on the instance, not the class, so fits running in parallel threads
+    keep their own counts.  Without the private method (another scikit-rf, or a stand-in)
+    the fit runs unguarded."""
+
+    def __init__(self, vf):
+        self.count = 0
+        self.poles = None
+        relocate = getattr(vf, "_pole_relocation", None)
+        if relocate is None:
+            return
+
+        def bounded(poles, *args, **kwargs):
+            self.count += 1
+            self.poles = poles
+            if self.count > _AUTO_FIT_MAX_RELOCATIONS:
+                raise _AutoFitStuck
+            return relocate(poles, *args, **kwargs)
+        vf._pole_relocation = bounded
+
+
+def _refit_stuck(net, limit, report, notes):
+    """vector_fit at the pole counts auto_fit was cycling at.  On the six ORCA files that
+    cycle it fits as well as the neighbouring caps that converge (max error 1.7e-3 to
+    1.7e-2), while another cap is no cure: one of them cycles at 20, 21 and 22."""
+    poles = np.atleast_1d(limit.poles)
+    n_real = int(np.count_nonzero(poles.imag == 0))
+    n_cmplx = int(np.count_nonzero(poles.imag != 0))
+    order = n_real + 2 * n_cmplx
+    report(_FIT_MAX_REPORTED, f"vector fitting did not settle, refitting at order {order}")
+    vf = VectorFitting(net)
+    vf.vector_fit(n_poles_real=n_real, n_poles_cmplx=n_cmplx)
+    if notes is not None:
+        notes.append(f"scikit-rf's auto_fit did not settle after {_AUTO_FIT_MAX_RELOCATIONS} "
+                     f"pole relocations at model order {order}, refitted with vector_fit at "
+                     f"{n_real} real and {n_cmplx} complex poles")
+    return vf
+
+
+def _auto_fit(net, max_order: int, report=null_progress, notes=None):
     """Run scikit-rf auto_fit with the model order bounded by `max_order`.
 
     auto_fit grows the model adaptively up to `model_order_max`, so capping that
@@ -278,18 +330,26 @@ def _auto_fit(net, max_order: int, report=null_progress):
     older versions behave like 1.12, and is inert on 1.12, which clamps to the same
     two numbers.  It is skipped when the default set already fits, so the growth path
     at higher orders is untouched.
+
+    A fit that is still relocating poles after _AUTO_FIT_MAX_RELOCATIONS is cycling and
+    is redone with vector_fit, with a line in `notes` saying so.
     """
     vf = VectorFitting(net)
     order = max(2, int(max_order))
     kwargs = {"model_order_max": order}
     if _AUTO_FIT_INIT_ORDER > order:
         kwargs.update(n_poles_init_real=order % 2, n_poles_init_cmplx=order // 2)
+    limit = _RelocationLimit(vf)
     report(0.0, "vector fitting")
-    with _fit_watch(vf, report):
-        try:
-            vf.auto_fit(**kwargs)
-        except TypeError:                          # different scikit-rf signature
-            vf.auto_fit()
+    try:
+        with _fit_watch(vf, report):
+            try:
+                vf.auto_fit(**kwargs)
+            except TypeError:                      # different scikit-rf signature
+                limit.count = 0
+                vf.auto_fit()
+    except _AutoFitStuck:
+        vf = _refit_stuck(net, limit, report, notes)
     report(1.0, "vector fitting done")
     return vf
 

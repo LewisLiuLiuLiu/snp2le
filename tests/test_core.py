@@ -744,6 +744,34 @@ def test_auto_fit_starts_inside_the_requested_order():
         universal.VectorFitting = real
 
 
+def test_a_cycling_auto_fit_is_stopped_and_refitted(monkeypatch):
+    """scikit-rf's auto_fit can alternate between two pole sets for good (6 of 3,200 ORCA
+    fits at model_order_max=20).  Past the relocation limit the fit is stopped and redone
+    with vector_fit at the pole counts it had reached, and the result says so.  A limit of
+    5 stands in for the cycle: the BPF needs 20 relocations at order 20."""
+    from snp2le.core import universal
+    monkeypatch.setattr(universal, "_AUTO_FIT_MAX_RELOCATIONS", 5)
+    res = engine.convert(ConverterState(mode="universal", max_order=20, enforce_passivity=False),
+                         _example("bpf_ihp-sg13g2.s2p"))
+    assert res.ok, res.error
+    notes = [m for m in res.messages if "did not settle" in m]
+    assert len(notes) == 1 and "refitted with vector_fit" in notes[0], res.messages
+    assert 0 < res.model_order <= 20 and res.rms_error < 0.1
+
+
+def test_the_relocation_limit_stays_with_its_own_fit():
+    """The limit wraps the fit instance, so another fit, in this thread or a parallel one,
+    neither shares its count nor finds scikit-rf's class patched."""
+    from snp2le.core import universal
+    from skrf.vectorFitting import VectorFitting
+    net = io.without_dc(_example("bpf_ihp-sg13g2.s2p"))
+    on_class = VectorFitting.__dict__["_pole_relocation"]
+    first, second = VectorFitting(net), VectorFitting(net)
+    universal._RelocationLimit(first)
+    assert "_pole_relocation" in vars(first) and "_pole_relocation" not in vars(second)
+    assert VectorFitting.__dict__["_pole_relocation"] is on_class
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):
