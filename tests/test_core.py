@@ -799,6 +799,46 @@ def test_a_failure_without_a_message_still_names_the_error(monkeypatch):
     assert not res.ok and res.error == "RuntimeError"
 
 
+def test_the_result_names_how_passivity_enforcement_went():
+    """Results.passivity_path says which branch produced the model, so a caller does not
+    have to read it out of the messages."""
+    cases = (("bpf_ihp-sg13g2.s2p", dict(max_order=6), "not needed"),
+             ("wpd_ihp-sg13g2.s3p", dict(max_order=6), "perturbed"),
+             ("balun_ihp-sg13cmos5l.s4p", dict(max_order=6), "near-passive"),
+             ("wpd_ihp-sg13g2.s3p", dict(max_order=6, enforce_passivity=False), "off"))
+    for name, kw, path in cases:
+        res = engine.convert(ConverterState(mode="universal", **kw), _example(name))
+        assert res.ok and res.passivity_path == path, (name, kw, res.passivity_path)
+    struct = engine.convert(ConverterState(mode="structure", structure_key="inductor-pi"),
+                            inductor_2port())
+    assert struct.ok and struct.passivity_path == ""
+
+
+def test_a_constant_term_above_the_ceiling_is_named():
+    """The balun at order 6 has a constant term D above 1, a violation band that runs to
+    infinity and that the residue perturbation cannot move.  The message names D and the
+    knob that is left.  A model that violates elsewhere (the raw WPD, at 0 Hz) gets no
+    such line, and the line never reads as an enforcement the GUI would call near-passive."""
+    import re
+
+    def d_lines(res):
+        return [m for m in res.messages if "constant term D" in m]
+
+    free = engine.convert(ConverterState(mode="universal", max_order=6, enforce_passivity=False),
+                          _example("balun_ihp-sg13cmos5l.s4p"))
+    (line,) = d_lines(free)
+    sigma_d = float(re.search(r"has sigma ([0-9.]+)", line).group(1))
+    assert sigma_d > 1.0 and "would have to refit at a lower order" in line
+    assert not any("passivity enforced" in m for m in free.messages)
+    tried = engine.convert(ConverterState(mode="universal", max_order=6),
+                           _example("balun_ihp-sg13cmos5l.s4p"))
+    (line,) = d_lines(tried)
+    assert tried.passivity_path == "near-passive" and line.endswith("try another Max order")
+    wpd = engine.convert(ConverterState(mode="universal", max_order=6, enforce_passivity=False),
+                         _example("wpd_ihp-sg13g2.s3p"))
+    assert wpd.sigma_max > 1.0 and not d_lines(wpd)
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):

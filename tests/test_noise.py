@@ -215,12 +215,27 @@ def test_a_model_that_is_not_strictly_passive_is_refused():
 
 
 def test_the_refusal_advice_follows_what_enforcement_already_did():
-    """Enforced at 1.00 and still above 1 (the balun at order 6, where the constant term
-    exceeds 1), the advice is another order or band, not the enforcement that already ran."""
-    res = _convert("balun_ihp-sg13cmos5l.s4p")
+    """Enforced at 1.00 and still above 1, the advice is another order or band, not the
+    enforcement that already ran.  The BPF at order 9 stays at 3.35 at 0 Hz."""
+    res = _convert("bpf_ihp-sg13g2.s2p", order=9)
     assert res.ok and not res.noise.ok and res.sigma_max > 1.0
     assert "could not bring it below 1, try another Max order" in res.noise.message
     assert "Enforce passivity at" not in res.noise.message
+    assert "constant term D" not in res.noise.message
+
+
+def test_the_refusal_names_a_constant_term_above_one():
+    """The balun at order 6 has a constant term D above 1, which passivity enforcement
+    cannot change.  The refusal names D.  Enforced, it advises another order, unenforced,
+    it says that enforcing could only refit at a lower order."""
+    res = _convert("balun_ihp-sg13cmos5l.s4p")
+    assert res.ok and not res.noise.ok and res.sigma_max > 1.0
+    assert "constant term D" in res.noise.message
+    assert res.noise.message.endswith("Try another Max order")
+    assert "Enforce passivity at" not in res.noise.message
+    free = _convert("balun_ihp-sg13cmos5l.s4p", passive=False)
+    assert not free.noise.ok and "constant term D" in free.noise.message
+    assert "would have to refit at a lower order" in free.noise.message
 
 
 def test_structure_mode_ignores_the_option():

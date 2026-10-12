@@ -94,7 +94,9 @@ residues, so a violation band that runs to infinity, caused by a non-passive con
 term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at order 13
 stays at 5.24 whatever you ask for. The accurate fit is then kept rather than a wrecked
 one and the result reads <i>near-passive</i>. The fix is a lower <b>Max order</b>, not a
-higher ceiling, since order 6 brings the same file to 0.9997.</p></li>
+higher ceiling, since order 6 brings the same file to 0.9997. Whenever the constant term D,
+the model's value at infinite frequency, is above the ceiling, the message line says so with
+its &sigma;.</p></li>
 <li><b>Thermal noise</b> (universal mode): a lossy passive at temperature T is a noise
 source, and its noise follows from its S-parameters alone, kT(I&nbsp;&minus;&nbsp;S&nbsp;S<sup>H</sup>)
 at its ports (Bosma's theorem). Unticked (the default), the model is noiseless, an ideal

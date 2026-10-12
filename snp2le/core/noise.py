@@ -243,11 +243,23 @@ def add_thermal_noise(ir, vf, sigma_max=None, sigma_max_freq=None,
             sigma = np.sqrt(max(0.0, 1.0 - min(loss_min, d_loss)))
             where = (f"at {format_eng(f[k], 'Hz')}" if loss_min <= d_loss
                      else "at high frequency")
-        advice = ("Enforcement at ceiling 1.00 could not bring it below 1, try another Max "
-                  "order or a narrower fit range" if strictly_enforced
-                  else "Enforce passivity at ceiling 1.00, or try another Max order")
+        if d_loss <= 0.0:
+            # The constant term D is the model at infinite frequency, and enforcement only
+            # perturbs residues, so it cannot bring D below 1.  min eig(I - D D^T) is
+            # 1 - sigma(D)^2.
+            cause = (f" Its constant term D, the model's value at infinite frequency, has "
+                     f"sigma {np.sqrt(1.0 - d_loss):.4f}, and passivity enforcement cannot "
+                     f"change D.")
+            advice = ("Try another Max order" if strictly_enforced
+                      else "Enforcing passivity at ceiling 1.00 would have to refit at a "
+                           "lower order, so try another Max order first")
+        else:
+            cause = ""
+            advice = ("Enforcement at ceiling 1.00 could not bring it below 1, try another "
+                      "Max order or a narrower fit range" if strictly_enforced
+                      else "Enforce passivity at ceiling 1.00, or try another Max order")
         return NoiseHealth(False, fail + f"the model is not strictly passive (sigma_max "
-                                         f"{sigma:.4f} {where}). {advice}",
+                                         f"{sigma:.4f} {where}).{cause} {advice}",
                            loss_min=min(loss_min, d_loss))
 
     w0 = float(np.max(np.abs(np.atleast_1d(vf.poles))))
