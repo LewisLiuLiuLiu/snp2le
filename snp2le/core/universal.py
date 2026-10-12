@@ -279,7 +279,7 @@ _AUTO_FIT_INIT_ORDER = 3 + 2 * 3
 # Pole relocations one auto_fit may take before it counts as stuck.  scikit-rf's adding and
 # skimming loop has no pass limit, and on some EM data it alternates between two pole sets
 # for good (6 of 3,200 ORCA fits at model_order_max=20, scikit-rf issue 1452).  Converging
-# fits need 20 to 120, the bundled examples at most 20.
+# fits need 8 to 120, the bundled examples at most 26 (ind_d20 at order 10).
 _AUTO_FIT_MAX_RELOCATIONS = 250
 
 
