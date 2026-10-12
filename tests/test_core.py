@@ -789,6 +789,14 @@ def test_the_relocation_limit_stays_with_its_own_fit():
     assert VectorFitting.__dict__["_pole_relocation"] is on_class
 
 
+def test_the_fit_handed_back_carries_no_relocation_limit():
+    """The limit comes off once auto_fit returns, so a caller who refits the returned model
+    later is not stopped by a count this fit left behind."""
+    from snp2le.core import universal
+    fit = universal.fit_universal(io.without_dc(_example("bpf_ihp-sg13g2.s2p")), max_order=13)
+    assert "_pole_relocation" not in vars(fit.vf)
+
+
 def test_a_failure_without_a_message_still_names_the_error(monkeypatch):
     """str() of some exceptions is empty, and an empty Results.error leaves the caller with
     a failure and no word on what failed."""
