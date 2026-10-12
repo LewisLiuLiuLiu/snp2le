@@ -80,6 +80,7 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  │  ├─ mna.py               rebuild N-port S-parameters from an RLC IR
 │  │  ├─ netlist.py           render the IR to Ngspice and VACASK
 │  │  ├─ noise.py             thermal-noise generator of a universal model
+│  │  ├─ process_state.py     process-wide settings shared by parallel conversions
 │  │  ├─ progress.py          progress reporting for long conversions
 │  │  ├─ state.py             ConverterState and Results dataclasses
 │  │  ├─ units.py             engineering-notation parse and format
@@ -123,6 +124,7 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  ├─ test_inductor_wideband.py  the wideband inductor fit, netlist and noise
 │  ├─ test_main_dispatch.py   the entry point's argument dispatch (no Qt)
 │  ├─ test_noise.py           the thermal-noise generator against Bosma's formula
+│  ├─ test_parallel_callers.py  fits in parallel threads give the streams back
 │  ├─ test_progress.py        progress reporting and the fit watcher
 │  ├─ test_qt_essentials.py   guards the Essentials-only dependency
 │  ├─ test_reproducibility.py same input, same model, across processes
@@ -307,7 +309,7 @@ More details worth knowing:
 **Export** writes the conversion that finished, so it is disabled while one is
 running and never blocks the window to re-fit.
 
-A conversion runs its linear algebra on one thread of the BLAS library (through [threadpoolctl](https://github.com/joblib/threadpoolctl)). Its matrices are small, so a thread pool costs more than it saves: a 7-port receiver core at order 24 with thermal noise converts in 2.2 s instead of 15 minutes with the default 14 threads. Set `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` to choose the count yourself. A simulator started from snp2le keeps its own threads.
+A conversion runs its linear algebra on one thread of the BLAS library (through [threadpoolctl](https://github.com/joblib/threadpoolctl)). Its matrices are small, so a thread pool costs more than it saves: a 7-port receiver core at order 24 with thermal noise converts in 2.2 s instead of 15 minutes with the default 14 threads. Set `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` to choose the count yourself. A simulator started from snp2le keeps its own threads. A program that runs several conversions at once in threads gets its own thread count and its console back when the last one finishes.
 
 ### Run a testbench (simulate)
 

@@ -17,12 +17,12 @@ A conversion runs its linear algebra on one BLAS thread (`_one_blas_thread`).
 """
 from __future__ import annotations
 import os
-from contextlib import nullcontext
 
 import numpy as np
 
 from .state import Results
 from .progress import StageTracker
+from .process_state import ProcessSetting
 from . import netlist as _nl
 from . import universal as _uni
 from . import mna as _mna
@@ -75,22 +75,37 @@ def _is_wideband(key) -> bool:
 _BLAS_THREAD_VARS = ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
 
+def _limit_blas():
+    """Limit the loaded BLAS libraries to one thread, returning what undoes it, or None when
+    nothing is limited: without threadpoolctl, or with a thread variable set by the user."""
+    if any(os.environ.get(k) for k in _BLAS_THREAD_VARS):
+        return None
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:                       # a --no-deps install: slower, not wrong
+        return None
+    import scipy.linalg  # noqa: F401  scipy brings its own OpenBLAS, load it before limiting
+    return threadpool_limits(limits=1, user_api="blas").restore_original_limits
+
+
+# Shared by overlapping conversions, so the last one out restores the count the process had.
+_BLAS_LIMIT = ProcessSetting(_limit_blas)
+
+
 def _one_blas_thread():
     """One BLAS thread for a conversion.  Its matrices are small, so a thread pool spends more
     on synchronising than on arithmetic: a 7-port core at order 24 with thermal noise took
     905 s with the default 14 threads and 2.2 s with one.  threadpoolctl limits the libraries
     loaded in this process
     and restores them afterwards, so a simulator started from the GUI or --simulate keeps its
-    own threads, which environment variables would not.  Without threadpoolctl, or with a
-    thread variable set by the user, nothing is limited."""
-    if any(os.environ.get(k) for k in _BLAS_THREAD_VARS):
-        return nullcontext()
-    try:
-        from threadpoolctl import threadpool_limits
-    except ImportError:                       # a --no-deps install: slower, not wrong
-        return nullcontext()
-    import scipy.linalg  # noqa: F401  scipy brings its own OpenBLAS, load it before limiting
-    return threadpool_limits(limits=1, user_api="blas")
+    own threads, which environment variables would not."""
+    return _BLAS_LIMIT.held()
+
+
+def error_text(exc) -> str:
+    """The message of a failed conversion.  Some exceptions carry none, and an empty error
+    would leave the caller with a failure and no word on what failed."""
+    return str(exc) or type(exc).__name__
 
 
 def convert(state, net, progress=None) -> Results:
@@ -120,7 +135,7 @@ def _convert(state, net, progress=None) -> Results:
         net, band_notes = _io.restrict_band(net, state.f_min, state.f_max)
     except (TypeError, ValueError) as exc:     # invalid band, or a non-number from a design
         res.ok = False
-        res.error = str(exc)
+        res.error = error_text(exc)
         return res
     res.band_limited = len(net.f) < n_file
 
@@ -135,7 +150,7 @@ def _convert(state, net, progress=None) -> Results:
             _convert_universal(state, net, res, track)
     except Exception as exc:                        # noqa: BLE001
         res.ok = False
-        res.error = str(exc)
+        res.error = error_text(exc)
         return res
 
     if wideband and len(net.f) and net.f[0] > f_file_lo:

@@ -51,7 +51,8 @@ class _FitThread(QtCore.QThread):
             # engine.convert already turns conversion failures into ok=False, so
             # reaching here means something unexpected.  It must still not take
             # the window down with it.
-            self.result = Results(ok=False, mode=self._state.mode, error=str(exc))
+            self.result = Results(ok=False, mode=self._state.mode,
+                                  error=engine.error_text(exc))
 
 
 class FitRunner(QtCore.QObject):
