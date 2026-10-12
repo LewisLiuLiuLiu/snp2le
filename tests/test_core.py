@@ -772,6 +772,16 @@ def test_the_relocation_limit_stays_with_its_own_fit():
     assert VectorFitting.__dict__["_pole_relocation"] is on_class
 
 
+def test_a_failure_without_a_message_still_names_the_error(monkeypatch):
+    """str() of some exceptions is empty, and an empty Results.error leaves the caller with
+    a failure and no word on what failed."""
+    def fail(*args, **kwargs):
+        raise RuntimeError()
+    monkeypatch.setattr(engine, "_convert_universal", fail)
+    res = engine.convert(ConverterState(mode="universal"), inductor_2port())
+    assert not res.ok and res.error == "RuntimeError"
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):
