@@ -45,7 +45,7 @@ class FitResult:
     sigma_max_freq: float = float("nan")   # where that peak sits [Hz]
     passivity_ceiling: float = 1.0      # sigma_max the fit was judged against
     # how the model came out of passivity enforcement: off, not needed, perturbed,
-    # reduced order or near-passive (enforcement ran and the free fit was kept)
+    # reduced order, dc refit or near-passive (enforcement ran and the free fit was kept)
     passivity_path: str = "off"
     rms_error: float = float("nan")     # fraction (0..1) over all Sij
     vf: object = None                   # the VectorFitting object
@@ -127,12 +127,16 @@ def effective_ceiling(enforce_passivity: bool,
 
 def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
                   passivity_ceiling: float = PASSIVITY_CEILING_DEFAULT,
-                  progress=None) -> FitResult:
+                  progress=None, dc_net=None) -> FitResult:
     """Vector-fit `net` and synthesise a lumped-element SPICE subcircuit.
 
     `passivity_ceiling` is the sigma_max the enforcement brings the model down to.  It
     applies only with `enforce_passivity=True`, since it is what the perturbation works
     towards, see `effective_ceiling`.
+
+    `dc_net` is the fitted band with the file's 0 Hz point still in it, when the file has
+    one.  Passivity enforcement tries a refit of it when residue perturbation cannot reach
+    the ceiling, see `_enforce_passivity_path`.
 
     `progress` is an optional `cb(fraction, message)` covering this call alone, from 0
     (nothing fitted) to 1 (subcircuit parsed and scored)."""
@@ -151,7 +155,8 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
         res.messages.extend(notes)
         if enforce_passivity:
             vf, msgs, attempted, res.passivity_path = _enforce_passivity_path(
-                vf, net, ceiling, _span(report, end_fit, _END_PASSIVITY))
+                vf, net, ceiling, _span(report, end_fit, _END_PASSIVITY), dc_net=dc_net,
+                max_order=max_order)
             res.messages.extend(msgs)
         report(_END_PASSIVITY, "measuring the passivity margin")
         res.sigma_max, res.sigma_max_freq = max_singular_value(vf)
@@ -407,7 +412,7 @@ def _enforce_passivity(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
 
 
 def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
-                            report=null_progress):
+                            report=null_progress, dc_net=None, max_order=None):
     """Bring the model's sigma_max down to `ceiling`, escalating effort only as needed,
     never shipping a worse model than the original fit.
 
@@ -416,8 +421,11 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
        (this catches narrow violation bands, and replaces scraping scikit-rf's
        warning text, which is brittle).  Each attempt starts from the clean fit
        so perturbations do not compound.
-    3. Last resort: one lower-order refit (a smaller model is often easier to
-       make passive, at some accuracy cost).
+    3. Last resorts: one lower-order refit (a smaller model is often easier to
+       make passive, at some accuracy cost), and with `dc_net`, the band including the
+       file's 0 Hz point, a refit at `max_order` that includes it.  That refit's constant
+       term is pinned to the DC point instead of free to run past 1, the violation residue
+       perturbation cannot reach.  The closer of the two to the data wins.
     A candidate is kept only if it clears the ceiling *and* still resembles the data
     (`rms < _USABLE_RMS`).  Otherwise the accurate near-passive fit is returned.  That
     guard matters more at a raised ceiling, not less: a model whose violation band runs
@@ -433,7 +441,7 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
     "nothing needed doing" is the answer to "why did my ceiling of 1.20 leave the model
     at 1.019", and the near-passive case must not borrow that wording: there the ceiling
     was missed, not unneeded.  `path` names the branch that produced the model: not needed,
-    perturbed, reduced order or near-passive.
+    perturbed, reduced order, dc refit or near-passive.
     """
     import copy
     msgs = []
@@ -442,18 +450,22 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
         report(1.0, "already below the ceiling")
         return vf, msgs, False, "not needed"
 
-    best = [None]                                  # [(rms, vf)] best usable candidate
+    best = [None]                    # [(rms, vf, how, path)] best usable candidate
     at = "" if ceiling <= PASSIVITY_CEILING_MIN else f" at {ceiling:.2f}"
 
-    def keep_if_good(cand, how):
+    def keep_if_good(cand, how, path):
         if not _meets_ceiling(cand, None, ceiling):
             return False
         r = _rms_error(cand, net)
         if r < _USABLE_RMS and (best[0] is None or r < best[0][0]):
-            best[0] = (r, cand)
-            msgs.append(f"passivity enforced{at} ({how}, rms={r:.2e})")
+            best[0] = (r, cand, how, path)
             return True
         return False
+
+    def kept():
+        r, cand, how, path = best[0]
+        msgs.append(f"passivity enforced{at} ({how}, rms={r:.2e})")
+        return cand, msgs, True, path
 
     # escalate the sample count, enforcing from the clean fit each time
     for i, n_samples in enumerate(_PASSIVITY_N_SAMPLES):
@@ -465,10 +477,10 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
         except Exception as exc:                   # noqa: BLE001
             msgs.append(f"passivity enforce failed: {exc}")
             break
-        if keep_if_good(cand, f"n_samples={n_samples}"):
-            return best[0][1], msgs, True, "perturbed"
+        if keep_if_good(cand, f"n_samples={n_samples}", "perturbed"):
+            return kept()
 
-    # last resort: a single lower-order refit (kept only if it clears the ceiling)
+    # last resorts, each kept only if it clears the ceiling: a single lower-order refit
     poles = np.atleast_1d(vf.poles)
     n_cmplx = int(np.count_nonzero(poles.imag)) or (len(poles) // 2)
     k = max(2, int(n_cmplx * 0.66))
@@ -482,8 +494,21 @@ def _enforce_passivity_path(vf, net, ceiling: float = PASSIVITY_CEILING_DEFAULT,
                 _enforce_at(cand, ceiling, _PASSIVITY_N_SAMPLES[-1])
         except Exception:                          # noqa: BLE001
             cand = None
-        if cand is not None and keep_if_good(cand, f"reduced order ({k} cmplx)"):
-            return best[0][1], msgs, True, "reduced order"
+        if cand is not None:
+            keep_if_good(cand, f"reduced order ({k} cmplx)", "reduced order")
+    # and a refit that includes the 0 Hz point, enforced the same way
+    if dc_net is not None:
+        report((len(_PASSIVITY_N_SAMPLES) + 0.5) / (len(_PASSIVITY_N_SAMPLES) + 1),
+               "refitting with the 0 Hz point")
+        try:
+            cand = _auto_fit(dc_net, max_order)
+            cand, _, _, how = _enforce_passivity_path(cand, dc_net, ceiling)
+        except Exception:                          # noqa: BLE001
+            cand = None
+        if cand is not None:
+            keep_if_good(cand, f"refit with the 0 Hz point, {how}", "dc refit")
+    if best[0] is not None:
+        return kept()
 
     msgs.append("passivity enforced (near-passive)")
     return vf, msgs, True, "near-passive"

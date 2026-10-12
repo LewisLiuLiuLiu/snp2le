@@ -51,6 +51,24 @@ def info_for(net: skrf.Network) -> NetworkInfo:
     )
 
 
+def passive_dc(net: skrf.Network):
+    """Return (`net` with its 0 Hz point made passive, sigma_max of that point before).
+
+    A DC point extrapolated by an EM solver can come out a hair above passivity (ORCA files
+    reach sigma 1.0000036), and a fit that includes it inherits a non-passive DC: a negative
+    DC conductance, which stops a harmonic-balance run.  Singular values of S(0) above 1
+    are clipped to 1.  Every direction with loss, a coil's DC resistance included, keeps
+    its value.  A network without a 0 Hz point comes back as it is, with NaN."""
+    if net is None or len(net.f) == 0 or net.f[0] != 0:
+        return net, float("nan")
+    u, sv, vh = np.linalg.svd(net.s[0])
+    if sv[0] <= 1.0:
+        return net, float(sv[0])
+    out = net.copy()
+    out.s[0] = u @ np.diag(np.minimum(sv, 1.0)) @ vh
+    return out, float(sv[0])
+
+
 def without_dc(net: skrf.Network) -> skrf.Network:
     """Return `net` with any DC (f=0) sample removed.
 

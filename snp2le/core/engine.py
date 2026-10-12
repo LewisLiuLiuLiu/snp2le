@@ -128,6 +128,7 @@ def _convert(state, net, progress=None) -> Results:
 
     from . import io as _io
     track.enter("prepare")
+    loaded = net
     net = _io.without_dc(net)            # a 0 Hz sample breaks the extraction math
     n_file = len(net.f)
     f_file_lo = float(net.f[0]) if n_file else 0.0
@@ -143,11 +144,17 @@ def _convert(state, net, progress=None) -> Results:
     res.n_ports = net.nports
     res.data_s = net.s
 
+    # The same band with the file's 0 Hz point still in it, for passivity enforcement to try
+    # a refit that includes it.  Only when the band starts at the bottom of the file.
+    dc_net = None
+    if state.mode != "structure" and len(loaded.f) and loaded.f[0] == 0 and not state.f_min:
+        dc_net = _io.passive_dc(_io.restrict_band(loaded, None, state.f_max)[0])[0]
+
     try:
         if state.mode == "structure":
             _convert_structure(state, net, res, track)
         else:
-            _convert_universal(state, net, res, track)
+            _convert_universal(state, net, res, track, dc_net)
     except Exception as exc:                        # noqa: BLE001
         res.ok = False
         res.error = error_text(exc)
@@ -175,12 +182,12 @@ def _summary(res) -> str:
     return f"{n} element{'' if n == 1 else 's'} extracted"
 
 
-def _convert_universal(state, net, res, track):
+def _convert_universal(state, net, res, track, dc_net=None):
     from . import dc as _dc
     fit = _uni.fit_universal(net, max_order=state.max_order,
                              enforce_passivity=state.enforce_passivity,
                              passivity_ceiling=state.passivity_ceiling,
-                             progress=track.sub("fit"))
+                             progress=track.sub("fit"), dc_net=dc_net)
     res.ir = fit.ir
     res.physical = False
     res.n_poles = fit.n_poles
