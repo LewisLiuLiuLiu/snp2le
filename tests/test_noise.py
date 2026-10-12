@@ -136,7 +136,7 @@ def test_a_75_ohm_reference_scales_the_injection():
     net.renormalize(75.0)                                # passive at order 10, not at 6
     res = engine.convert(ConverterState(max_order=10, thermal_noise=True), net)
     assert res.noise.ok, res.noise.message
-    assert " 75 noisy=0" in res.ngspice                    # the sensors are 75 ohm
+    assert " 75.0 noisy=0" in res.ngspice                  # the sensors are 75 ohm
     for f in _F:
         cov, S = _port_noise(res.ir, f, z0=75.0)
         want = 75.0 * (np.eye(3) - S @ S.conj().T)
