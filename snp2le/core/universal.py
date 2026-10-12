@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 import io as _io
 import contextlib
 import math
+import sys
 import threading
 import numpy as np
 
@@ -28,6 +29,7 @@ from skrf.vectorFitting import VectorFitting
 
 from .ir import CircuitIR
 from .progress import null_progress
+from .process_state import ProcessSetting
 from . import netlist as _nl
 
 
@@ -137,11 +139,10 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
     ceiling = res.passivity_ceiling = effective_ceiling(enforce_passivity,
                                                         passivity_ceiling)
     attempted = False
-    # These rebind sys.stdout/sys.stderr process-wide, not per thread, and the GUI now
-    # runs this on a worker, so the whole application is muted for the duration of the
-    # fit.  See doc/architecture.md, "Notes / limitations.
-    with contextlib.redirect_stdout(_io.StringIO()), \
-            contextlib.redirect_stderr(_io.StringIO()):
+    # The streams belong to the process, not to this thread, and the GUI runs this on a
+    # worker, so the whole application is muted while a fit runs.  See doc/architecture.md,
+    # "Notes / limitations".
+    with _QUIET.held():
         vf = _auto_fit(net, max_order, _span(report, 0.0, end_fit))
         if enforce_passivity:
             vf, msgs, attempted = _enforce_passivity(
@@ -204,6 +205,21 @@ def fit_universal(net, max_order: int = 12, enforce_passivity: bool = True,
         _nl.parse_spice_subckt(spice_text, name="s_equivalent"), target=1.0))
     report(1.0, f"{res.n_poles} poles, rms {res.rms_error:.2e}")
     return res
+
+
+def _silence_streams():
+    """Point sys.stdout and sys.stderr at throwaway buffers, returning what restores them.
+    scikit-rf reports through warnings, which Python writes to sys.stderr."""
+    saved = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _io.StringIO(), _io.StringIO()
+
+    def restore():
+        sys.stdout, sys.stderr = saved
+    return restore
+
+
+# Shared by overlapping fits, so the last one out restores the streams the process had.
+_QUIET = ProcessSetting(_silence_streams)
 
 
 def _span(report, lo, hi):

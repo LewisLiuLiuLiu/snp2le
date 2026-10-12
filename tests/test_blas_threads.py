@@ -10,6 +10,7 @@ Run with:  pytest -q
 """
 import os
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -59,4 +60,45 @@ def test_a_conversion_runs_on_one_blas_thread_and_gives_the_count_back(two_threa
 def test_a_thread_count_the_user_set_is_left_alone(two_threads, monkeypatch):
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "2")
     assert _threads_seen_while_converting() == {(2,)}
+    assert _blas_threads() == [2]
+
+
+def test_overlapping_conversions_give_the_count_back(two_threads, monkeypatch):
+    """A library caller may run conversions in parallel threads.  Forced overlap: both are
+    inside, then the first one leaves before the second.  With a save-and-restore per call
+    the second would run on the restored count after the first left, and put back the first
+    one's limit at the end, leaving the process on one thread for good."""
+    for name in engine._BLAS_THREAD_VARS:
+        monkeypatch.delenv(name, raising=False)
+    both_inside = threading.Barrier(2, timeout=120)
+    first_left = threading.Event()
+    seen = []
+    real = engine._convert
+
+    def held(*args, **kwargs):
+        res = real(*args, **kwargs)
+        both_inside.wait()
+        seen.append(tuple(_blas_threads()))
+        if threading.current_thread().name == "second":
+            assert first_left.wait(timeout=120)
+            seen.append(tuple(_blas_threads()))     # the first one has left, the limit holds
+        return res
+
+    monkeypatch.setattr(engine, "_convert", held)
+    net = io.load_touchstone(_BPF)
+    results = []
+
+    def run(done=None):
+        results.append(engine.convert(ConverterState(mode="universal", max_order=6), net))
+        if done is not None:
+            done.set()
+
+    first = threading.Thread(target=run, args=(first_left,), name="first")
+    second = threading.Thread(target=run, name="second")
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+    assert len(results) == 2 and all(r.ok for r in results)
+    assert seen == [(1,), (1,), (1,)]
     assert _blas_threads() == [2]
