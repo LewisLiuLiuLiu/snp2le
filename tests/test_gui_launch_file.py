@@ -10,6 +10,7 @@ These tests drive the real MainWindow offscreen (QT_QPA_PLATFORM=offscreen), so 
 in CI without a display.  Run with: pytest -q
 """
 import contextlib
+import json
 import os
 import sys
 import time
@@ -132,3 +133,37 @@ def test_unreadable_launch_file_falls_back_to_the_example(app, warnings, tmp_pat
         _settle(w)
         assert w.state.source_path == EXAMPLE
         assert len(warnings) == 1
+
+
+def test_a_design_with_a_missing_file_keeps_the_loaded_one(app, warnings, tmp_path,
+                                                           monkeypatch):
+    """The window converts the file on screen, so the state keeps its path for Export and
+    Save design, and a dialog names the file the design asked for."""
+    missing = str(tmp_path / "gone.s2p")
+    design = tmp_path / "design.json"
+    design.write_text('{"mode": "universal", "max_order": 8, "source_path": %s}'
+                      % json.dumps(missing))
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(design), ""))
+    with _window(app, None) as w:
+        w.on_load_design()
+        _settle(w)
+        assert w.state.source_path == EXAMPLE and w.net.nports == 4
+        assert w.state.max_order == 8
+        assert len(warnings) == 1 and missing in warnings[0][1]
+
+
+def test_a_design_without_a_file_keeps_the_loaded_one(app, warnings, tmp_path, monkeypatch):
+    """A design written by hand or by a script often names no file. Its settings apply to
+    the file on screen, which Export and Save design keep naming."""
+    design = tmp_path / "design.json"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(design), ""))
+    for text in ('{"mode": "universal", "max_order": 8}',
+                 '{"mode": "universal", "max_order": 8, "source_path": ""}'):
+        design.write_text(text)
+        with _window(app, None) as w:
+            w.on_load_design()
+            _settle(w)
+            assert w.state.source_path == EXAMPLE and w.net.nports == 4, text
+            assert w.state.max_order == 8 and not warnings

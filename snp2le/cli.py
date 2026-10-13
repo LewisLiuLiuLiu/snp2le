@@ -165,6 +165,50 @@ def _positive(text):
     return v
 
 
+def _order(text):
+    """argparse type for --order (an integer, 2 or more, the smallest model order)."""
+    try:
+        n = int(text)
+    except Exception:                                       # noqa: BLE001
+        raise argparse.ArgumentTypeError(f"invalid order '{text}' (an integer, 2 or more)")
+    if n < 2:
+        raise argparse.ArgumentTypeError(f"--order must be 2 or more (got {n})")
+    return n
+
+
+def _band_edge(text):
+    """argparse type for --fmin (a frequency, 0 Hz or more)."""
+    v = _freq(text)
+    if not v >= 0:
+        raise argparse.ArgumentTypeError(f"a fit range edge must be 0 Hz or more (got {text})")
+    return v
+
+
+def _band_top(text):
+    """argparse type for --fmax (above 0 Hz, since the fit treats 0 as an open edge)."""
+    v = _freq(text)
+    if not v > 0:
+        raise argparse.ArgumentTypeError(f"--fmax must be above 0 Hz (got {text})")
+    return v
+
+
+def _seconds(text):
+    """argparse type for --timeout (seconds, above 0)."""
+    try:
+        v = float(text)
+    except Exception:                                       # noqa: BLE001
+        raise argparse.ArgumentTypeError(f"invalid time '{text}' (seconds, e.g. 300)")
+    if not 0 < v < float("inf"):
+        raise argparse.ArgumentTypeError(f"--timeout must be above 0 s (got {text})")
+    return v
+
+
+def _simulator_for(sch):
+    """The simulator a testbench is for, from its file name alone as the GUI does, so a folder
+    named vacask_runs/ cannot pick VACASK for an Ngspice testbench."""
+    return "vacask" if "vacask" in os.path.basename(sch).lower() else "ngspice"
+
+
 def _corner(text):
     """argparse type for the DC pin's corner frequency (above 0 Hz)."""
     v = _freq(text)
@@ -257,6 +301,7 @@ def _print_values(res):
 
 def _print_tolerances(res):
     if not res.value_drift:
+        print("       tolerances: none, this model has no per-element tolerance")
         return
     print("       tolerances (|data-model|/model at f_ext):")
     for lab, pct in res.value_drift.items():
@@ -389,7 +434,7 @@ def _run_testbench(sch, simulator, show_output, sweep, timeout):
         print("  " + msg, file=sys.stderr)
         _tail_log(log, "VACASK console")
         if simulator != "vacask":
-            print("  Ngspice keeps no log here; run the testbench directly or open it in "
+            print("  Ngspice keeps no log here. Run the testbench directly or open it in "
                   "xschem to see the error", file=sys.stderr)
         return None
 
@@ -462,18 +507,27 @@ def cmd_convert(args):
                   f"{', '.join(sorted(valid))}", file=sys.stderr)
             return 2
 
-    paths = []
+    paths, missing = [], []
     for pat in args.inputs:
         hits = sorted(glob.glob(pat))
         if not hits and not os.path.exists(pat):
-            print(f"[WARN] no file matches '{pat}'", file=sys.stderr)
+            print(f"[FAIL] no file matches '{pat}'", file=sys.stderr)
+            missing.append(pat)
+            continue
         paths.extend(hits or [pat])
     if not paths:
-        print("no input files", file=sys.stderr)
-        return 2
+        if not missing:
+            print("no input files", file=sys.stderr)
+        return 1 if missing else 2
     if args.output and len(paths) > 1:
-        print("[WARN] -o is ignored with multiple inputs; each output is named after its "
+        print("[WARN] -o is ignored with multiple inputs, each output is named after its "
               "source", file=sys.stderr)
+    elif args.output and (os.path.isdir(args.output)
+                          or args.output.endswith(("/", os.sep))):
+        # with --format both the stem would be the folder's name, or empty after a separator
+        print(f"[FAIL] -o {args.output}: that is a folder, -o takes a file name",
+              file=sys.stderr)
+        return 1
 
     # the ceiling is what the enforcement aims at, so it means nothing without it
     if args.passivity_ceiling is not None and not args.passive:
@@ -485,9 +539,11 @@ def cmd_convert(args):
     struct = get_structure(args.structure) if args.mode == "structure" else None
     named_wideband = getattr(STRUCTURES.get(args.structure), "wideband", False)
     if given and not (struct is not None and struct.wideband):
-        why = ("need --mode structure" if named_wideband else "apply to the wideband "
-               "inductor structures (inductor-wideband, inductor-ct) only")
-        print(f"[WARN] {', '.join(given)} ignored, these {why}", file=sys.stderr)
+        one = len(given) == 1
+        why = (f"{'it needs' if one else 'these need'} --mode structure" if named_wideband
+               else f"{'it applies' if one else 'these apply'} to the wideband inductor "
+                    f"structures (inductor-wideband, inductor-ct) only")
+        print(f"[WARN] {', '.join(given)} ignored, {why}", file=sys.stderr)
     elif given:
         if args.ct_port is not None and struct.n_ports != 3:
             print("[WARN] --ct-port is ignored, it applies to inductor-ct only",
@@ -507,6 +563,23 @@ def cmd_convert(args):
         if unused:
             print(f"[WARN] {', '.join(unused)} ignored, the wideband inductors are fitted "
                   f"over the band and have no extraction frequency", file=sys.stderr)
+    if args.mode != "structure":
+        unused = [name for name, on in (("--fext", args.fext is not None),
+                                        ("--stages", args.stages is not None),
+                                        ("--no-iso-r", not args.iso_r),
+                                        ("--tolerances", args.tolerances)) if on]
+        if unused:
+            print(f"[WARN] {', '.join(unused)} ignored in universal mode, "
+                  f"{'it applies' if len(unused) == 1 else 'these apply'} to structure "
+                  f"models", file=sys.stderr)
+    elif struct is not None:
+        unused = [name for name, on in (
+            ("--stages", args.stages is not None and args.structure != "tline-rlgc"),
+            ("--no-iso-r", not args.iso_r and args.structure not in ("wilkinson-inphase",
+                                                                     "branchline"))) if on]
+        if unused:
+            print(f"[WARN] {', '.join(unused)} ignored, {args.structure} has no such option",
+                  file=sys.stderr)
     if args.thermal_noise and args.mode == "structure":
         print("[WARN] --thermal-noise is ignored in structure mode, whose resistors are the "
               "structure's loss and always carry their thermal noise", file=sys.stderr)
@@ -521,9 +594,11 @@ def cmd_convert(args):
         print(f"[WARN] {', '.join(pin_given)} ignored with --no-dc-pin", file=sys.stderr)
 
     formats = ["ngspice", "vacask"] if args.format == "both" else [args.format]
-    rc = 0
+    rc = 1 if missing else 0
     last_res = None
     written = set()                     # absolute paths this run wrote
+    # warn about a renamed .SUBCKT only for a name given with -o, not one taken from the source
+    named = bool(args.output) and len(paths) == 1
     for src in paths:
         outs = [_out_path(src, args.output, d, len(paths), len(formats)) for d in formats]
         try:
@@ -542,7 +617,7 @@ def cmd_convert(args):
             dc_island_leak=(ConverterState.dc_island_leak if args.dc_island_leak is None
                             else args.dc_island_leak),
             f_extract=ConverterState.f_extract if args.fext is None else args.fext,
-            n_segments=args.stages, iso_resistor=args.iso_r,
+            n_segments=2 if args.stages is None else args.stages, iso_resistor=args.iso_r,
             basic_model=args.basic, coil_segments=args.segments or 0,
             substrate=args.substrate, peak_q_weight=args.peak_q_weight or 0.0,
             shunt_accuracy=args.shunt_accuracy or 0.0, center_tap=args.ct_port or 0,
@@ -573,12 +648,22 @@ def cmd_convert(args):
                 # name the .SUBCKT after the output file (bpf_le.spice -> bpf_le), so a
                 # testbench that instantiates that name resolves the .include.  The GUI export
                 # does the same.  The default 's_equivalent' would not match the testbench.
-                res.ir.name = netlist.safe_subckt_name(
-                    os.path.splitext(os.path.basename(out))[0])
+                stem = os.path.splitext(os.path.basename(out))[0]
+                res.ir.name = netlist.safe_subckt_name(stem)
+                if res.ir.name != stem and named:
+                    print(f"[WARN] {out}: the subcircuit is named {res.ir.name}, since "
+                          f"'{stem}' is not a valid name in both Ngspice and VACASK. Name "
+                          f"the file {res.ir.name}{os.path.splitext(out)[1]} to keep the "
+                          f"two equal", file=sys.stderr)
                 text = (netlist.render_vacask(res.ir) if dialect == "vacask"
                         else netlist.render_ngspice(res.ir))
             else:
                 text = res.vacask if dialect == "vacask" else res.ngspice
+            if os.path.isdir(out):
+                print(f"[FAIL] {src} -> {out}: that is a folder, -o takes a file name",
+                      file=sys.stderr)
+                rc = 1
+                continue
             try:
                 parent = os.path.dirname(os.path.abspath(out))
                 os.makedirs(parent, exist_ok=True)
@@ -611,7 +696,7 @@ def cmd_convert(args):
         # a singular DC operating point makes the netlist unsimulable, so always warn
         if res.dc is not None and not res.dc.ok:
             print(f"[WARN] {src}: DC operating point may be singular "
-                  f"(margin {res.dc.margin:.0e}); try a lower --order or --passive",
+                  f"(margin {res.dc.margin:.0e}), try a lower --order or --passive",
                   file=sys.stderr)
         if (pin_given and args.dc_pin is not False and res.mode == "universal"
                 and res.dc_pin is None):
@@ -628,15 +713,15 @@ def cmd_convert(args):
     # optional: run a testbench, then show the data-vs-model-vs-sim plots
     sim = None
     if args.simulate and last_res is None:
-        print("[WARN] no successful conversion; skipping --simulate", file=sys.stderr)
+        print("[WARN] no successful conversion, skipping --simulate", file=sys.stderr)
     elif args.simulate:
         if len(paths) > 1:
-            print("[WARN] --simulate uses the last converted file; the testbench's DUT must "
-                  "match it", file=sys.stderr)
-        simr = args.simulator or ("vacask" if "vacask" in args.simulate.lower() else "ngspice")
+            print("[WARN] --simulate uses the last converted file, and the testbench's DUT "
+                  "must match it", file=sys.stderr)
+        simr = args.simulator or _simulator_for(args.simulate)
         if simr not in formats:
-            print(f"[WARN] simulating with {simr} but only {'/'.join(formats)} was exported; "
-                  f"the testbench may not find its DUT netlist (use --format {simr} or both)",
+            print(f"[WARN] simulating with {simr} but only {'/'.join(formats)} was exported, "
+                  f"so the testbench may not find its DUT netlist (use --format {simr} or both)",
                   file=sys.stderr)
         sweep = None                    # the model is only valid where it was fitted
         if last_res.freq is not None and len(last_res.freq):
@@ -675,9 +760,11 @@ def build_parser():
     # mode and model
     c.add_argument("--mode", choices=["universal", "structure"], default="universal")
     c.add_argument("--structure", default="inductor-pi",
-                   help="structure key when --mode structure (see list-structures)")
+                   help="structure key when --mode structure (see list-structures, default "
+                        "inductor-pi)")
     # universal-mode options
-    c.add_argument("--order", type=int, default=6, help="max model order (universal)")
+    c.add_argument("--order", type=_order, default=6,
+                   help="max model order, 2 or more (universal, default 6)")
     c.add_argument("--passive", action="store_true", default=True,
                    help="enforce passivity (universal, default on)")
     c.add_argument("--no-passive", dest="passive", action="store_false")
@@ -713,17 +800,18 @@ def build_parser():
     # structure-mode options
     c.add_argument("--fext", type=_freq, default=None, metavar="FREQ",
                    help="extraction frequency, e.g. 7GHz (structure, default 10GHz)")
-    c.add_argument("--stages", type=_stages, default=2,
-                   help="RLGC ladder cells, 1 to 10 (tline-rlgc)")
+    c.add_argument("--stages", type=_stages, default=None,
+                   help="RLGC ladder cells, 1 to 10 (tline-rlgc, default 2)")
     # fit band (both modes): restrict the data the model is fitted to
-    c.add_argument("--fmin", type=_freq, default=None, metavar="FREQ",
+    c.add_argument("--fmin", type=_band_edge, default=None, metavar="FREQ",
                    help="lowest frequency used for the fit, e.g. 110GHz "
                         "(default: the file's first point)")
-    c.add_argument("--fmax", type=_freq, default=None, metavar="FREQ",
+    c.add_argument("--fmax", type=_band_top, default=None, metavar="FREQ",
                    help="highest frequency used for the fit, e.g. 170GHz "
                         "(default: the file's last point)")
     c.add_argument("--iso-r", dest="iso_r", action="store_true", default=True,
-                   help="include the Wilkinson isolation R or branch-line arm loss")
+                   help="include the in-phase Wilkinson's isolation R or the branch-line "
+                        "coupler's arm loss (default on)")
     c.add_argument("--no-iso-r", dest="iso_r", action="store_false")
     # wideband inductor fit (inductor-wideband, inductor-ct)
     seg_lo, seg_hi = inductor_fit.SEGMENT_RANGE
@@ -751,11 +839,14 @@ def build_parser():
     c.add_argument("--ct-port", type=int, choices=(1, 2, 3), default=None,
                    help="center tap port of inductor-ct (default: detected from the data)")
     # output
-    c.add_argument("--format", choices=["ngspice", "vacask", "both"], default="ngspice")
+    c.add_argument("--format", choices=["ngspice", "vacask", "both"], default="ngspice",
+                   help="output dialect(s), default ngspice. VACASK writes .inc")
     c.add_argument("-o", "--output", default=None, help="output path (single input)")
     c.add_argument("--values", action="store_true", help="print the extracted element values")
     c.add_argument("--tolerances", action="store_true", help="print per-element tolerances")
-    c.add_argument("--quiet", action="store_true", help="suppress the per-file status line")
+    c.add_argument("--quiet", action="store_true",
+                   help="suppress the per-file status and note: lines and the progress bar. "
+                        "[FAIL] and [WARN] lines stay")
     c.add_argument("--progress", action="store_true", default=None,
                    help="show a progress bar while converting (default: only on a terminal)")
     c.add_argument("--no-progress", dest="progress", action="store_false",
@@ -766,7 +857,7 @@ def build_parser():
                    help="simulator for --simulate (default: auto from the .sch name)")
     c.add_argument("--show-output", action="store_true",
                    help="show the simulator console and plot windows during the run")
-    c.add_argument("--timeout", type=float, default=180.0, metavar="S",
+    c.add_argument("--timeout", type=_seconds, default=180.0, metavar="S",
                    help="seconds to wait for a --simulate result (default 180)")
     c.add_argument("--plot", nargs="?", const="auto", default=None, metavar="SPARAMS",
                    help="display data-vs-model plots (optional comma list, e.g. S11,S21)")

@@ -1,6 +1,6 @@
 version = 1
 
-# Files that cannot carry an SPDX header (configs, documentation, schematics and
+# Files that cannot carry an SPDX header (configs, documentation, Xschem
 # symbols, generated netlists, example Touchstone data, figures and result tables)
 # are annotated here.  Source files (Python scripts and workflows) carry their own
 # SPDX headers, so the license check still catches new source files without

@@ -128,10 +128,10 @@ def restrict_band(net, f_min=None, f_max=None):
             f"requested fit range {_band_text(lo, hi)} lies outside the data "
             f"({format_eng(d0, 'Hz')} to {format_eng(d1, 'Hz')})")
     if lo is not None and lo < d0:
-        notes.append(f"f_min {format_eng(lo, 'Hz')} is below the data; "
+        notes.append(f"f_min {format_eng(lo, 'Hz')} is below the data, "
                      f"fitting from {format_eng(d0, 'Hz')}")
     if hi is not None and hi > d1:
-        notes.append(f"f_max {format_eng(hi, 'Hz')} is above the data; "
+        notes.append(f"f_max {format_eng(hi, 'Hz')} is above the data, "
                      f"fitting up to {format_eng(d1, 'Hz')}")
 
     keep = np.ones(f.shape, dtype=bool)

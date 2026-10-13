@@ -49,7 +49,8 @@ def format_eng(value, unit: str = "", sig: int = 3) -> str:
     if v == 0:
         return f"0 {unit}".strip()
     sign = "-" if v < 0 else ""
-    a = abs(v)
+    # round before picking the prefix, or 0.9996 would print as "1e+03 m"
+    a = float(f"{abs(v):.{sig}g}")
     for scale, prefix in _FORMAT_STEPS:
         if a >= scale:
             return f"{sign}{a / scale:.{sig}g} {prefix}{unit}".strip()

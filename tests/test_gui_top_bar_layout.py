@@ -107,7 +107,7 @@ def test_no_other_row_sets_the_window_floor(bar):
 
 def test_the_dc_pin_box_takes_no_width_or_height(bar):
     """It sits on the fit range's caption line, in width the two fields already take, since
-    the bar has none to spare (1899 px on a 1920 px screen in the container), and at the
+    the bar has none to spare (1903 px on a 1920 px screen in the container), and at the
     caption's own height, so the fields stay in line with every other field in the strip."""
     fields = bar.f_min.parentWidget()
     assert bar.band_box.sizeHint().width() == fields.sizeHint().width()
@@ -116,6 +116,14 @@ def test_the_dc_pin_box_takes_no_width_or_height(bar):
     def top(w):
         return w.mapTo(row, QtCore.QPoint(0, 0)).y()
     assert top(bar.f_min) == top(bar.order) == top(bar.p_ceiling)
+
+
+def test_the_max_order_box_holds_two_digits(bar):
+    """Max order and Stages both show up to two digits.  At 66 px the order box left its
+    text 19 px and Windows drew "13" as "1" and a sliver, while the 70 px Stages box shows
+    "10" whole, so the order box gets at least the same room."""
+    assert bar.order.maximumWidth() >= bar.stages.maximumWidth()
+    assert bar.order.lineEdit().width() >= 23
 
 
 def test_the_tick_box_labels_stay_wrapped(bar):

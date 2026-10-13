@@ -30,7 +30,7 @@ It offers two conversion philosophies:
 - **Universal (any N-port).** Vector-fits the S-parameters with [scikit-rf](https://scikit-rf.org) `VectorFitting`, optionally enforces passivity, and synthesises a passive macromodel of R, C and controlled sources. It works for any structure and port count, and is electrically exact but not physically interpretable. Its resistors are emitted noiseless (`noisy=0`, understood by both Ngspice and VACASK): they exist to reproduce the fitted response, not to model a device, and charging thermal noise against them would report noise that tracks the fit order instead of the structure. So by default the model is noiseless (ideal), and the **Thermal noise** option adds the noise the lossy passive really has, kT(I - S S<sup>H</sup>) at its ports, as a generator computed from the fit. See [Thermal noise](https://github.com/iic-jku/snp2le#thermal-noise).
 - **Structure-specific.** Fits a known physical topology, so every component maps to reality (series L, shunt C, coupling k, and so on) at a chosen **extraction frequency**. The two wideband inductor models are the exception: they are fitted over the whole band, up to past the self-resonance, and also handle a center-tapped coil. Its resistors model real loss (a Wilkinson's isolation resistor, a coil's conductor loss), so they keep their thermal noise. See [Available structures](https://github.com/iic-jku/snp2le#available-structures).
 
-Either mode fits the file's full frequency range by default, or a **fit range** of your choosing (e.g. only 110 GHz to 170 GHz of a 80 GHz to 240 GHz EM sweep), so the model order is spent on the band the block actually operates in.
+Either mode fits the file's full frequency range by default, or a **fit range** of your choosing (e.g. only 110 GHz to 170 GHz of an 80 GHz to 240 GHz EM sweep), so the model order is spent on the band the block actually operates in.
 
 A single dialect-agnostic **Circuit IR** drives both netlist backends and the on-screen schematic, so the outputs always agree. The code is split into a pure-Python, Qt-free `snp2le.core` (fully unit-tested) and a thin `snp2le.gui` on PySide6-Essentials, both driven by one entry point, `engine.convert(state, net)`.
 
@@ -89,7 +89,7 @@ A fit of a large N-port runs for seconds to minutes, so it runs on a worker thre
 │  │  └─ xschem.py            headless Xschem netlist and simulate
 │  ├─ 📁 examples/            Touchstone .sNp samples (BPF, ind, balun, ...)
 │  ├─ 📁 gui/                 PySide6-Essentials, no maths
-│  │  ├─ 📁 assets/           logos (svg and png), snp2le.ico
+│  │  ├─ 📁 assets/           logos (svg and png), snp2le.ico, spin-box arrows
 │  │  ├─ __init__.py
 │  │  ├─ design_view.py       results, values, tolerances, schematic
 │  │  ├─ fit_runner.py        runs engine.convert on a worker thread
@@ -157,7 +157,7 @@ pip install snp2le
 pipx install snp2le
 ```
 
-From source (for development), an editable install pulls in every dependency:
+From source (for development), an editable install with the `dev` extra pulls in the runtime dependencies plus pytest, build, twine and reuse:
 
 ```bash
 git clone https://github.com/iic-jku/snp2le.git
@@ -167,7 +167,7 @@ python -m venv .venv
 # Windows:        .venv\Scripts\activate
 # macOS / Linux:  source .venv/bin/activate
 
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Run the GUI
@@ -175,7 +175,7 @@ pip install -e .
 ```bash
 snp2le              # after installing (pip / pipx)
 snp2le design.s4p   # the same, opened on that Touchstone file
-python -m snp2le    # from the repo root of a source checkout, no install needed
+python -m snp2le    # from the repo root of a source checkout, without installing snp2le itself
 ```
 
 A bundled example is preloaded when no file is named. More live in `snp2le/examples/`.
@@ -183,18 +183,16 @@ A bundled example is preloaded when no file is named. More live in `snp2le/examp
 Naming a `.sNp` file on the command line opens the GUI on it instead of the example, with the port count, the fit range and the first conversion taken from that file. This is how a tool that just wrote the file hands it over, for example the *Model Fit* button of [setupEM](https://github.com/VolkerMuehlhaus/setupEM) after an AWS Palace run. *Reset* returns to that file rather than to the example. A file that cannot be read is reported in a dialog (and on stderr) and the example is loaded in its place, so the window opens either way.
 
 > [!NOTE]
-> Start it as a module (`python -m snp2le`), not `python snp2le/app.py`. The launcher
-> imports the `snp2le` package, which Python only finds when it is run as a module from
-> the repo root (or after `pip install`).
+> Start it as a module (`python -m snp2le`), not `python snp2le/app.py`. The launcher imports the `snp2le` package, which Python only finds when it is run as a module from the repo root (or after `pip install`).
 
 ### Typical workflow
 
 1. **Load** a Touchstone `.sNp` file from the top bar, or name it on the command line (`snp2le design.s4p`, see above). The header shows the port count and frequency range.
-2. **Choose a mode.** Universal (set *Max order*, *Enforce passivity* and the *Passivity ceiling* it works towards, and tick *Thermal noise* for a model that carries the passive's noise) or Structure-specific (pick a structure and set the *extraction frequency*). Some structures expose an extra option such as *Stages*, *Isolation R* or *Resistive loss*. The wideband inductors have no extraction frequency and show their own options instead: *Basic model*, *Segments* (*Center tap* for the center-tapped one), *Peak-Q weight* and *Measured data*. *Max order* bounds the model order, `n_real + 2 x n_complex`, which is also the number of internal states in the netlist. The *Result* panel's *order* line reports the order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair counts once, so the two numbers differ by design.
+2. **Choose a mode.** Universal (set *Max order*, *Enforce passivity* and the *Passivity ceiling* it works towards, and tick *Thermal noise* for a model that carries the passive's noise) or Structure-specific (pick a structure and set the *extraction frequency*). Some structures expose an extra option such as *Stages*, *Isolation R* or *Resistive loss*. The wideband inductors have no extraction frequency and show their own options instead: *Basic model*, *Segments* (*Center tap* for the center-tapped one), *Peak-Q weight* and *Measured data*. *Max order* bounds the model order, `n_real + 2 x n_complex`, which is the number of internal states per port in the netlist (an N-port has N times that). The *Result* panel's *order* line reports the order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair counts once, so the two numbers differ by design.
 3. **Restrict the fit range** (optional, both modes). The *Fit range (GHz)* fields start at the loaded file's own span, so they always name the band being fitted. Enter two plain numbers in GHz (e.g. `110` and `170`) to fit only a sub-band. The *Result* panel shows the band actually fitted, and the RMS error, the tolerances, the plots and a testbench run's sweep all follow it. An edge outside the data is clamped to the data and reported, an empty or inverted band is refused. The **DC pin** tick box on the caption line (universal mode, ticked by default) makes the model meet a file's 0 Hz sample, see [The 0 Hz point](https://github.com/iic-jku/snp2le#the-0-hz-point).
 4. **Inspect** the result, element values, per-element **tolerances** at the extraction frequency, the drawn schematic, and the generated netlist in the **Design & Schematic** view.
 5. **Compare** the loaded data (grey) against the extracted model (blue) in the **Plot** view (up to four traces, magnitude and phase). The **View** switch at the right of the title bar carries both views side by side and fills the one you are on, so a click moves between them.
-6. **Export** the netlist. *Export Ngspice* writes a `.spice` file and *Export VACASK* writes an `.inc` file. The `.SUBCKT` is named after the file, so a testbench that instantiates it resolves the include.
+6. **Export** the netlist. *Export Ngspice* writes a `.spice` file and *Export VACASK* writes an `.inc` file. The `.SUBCKT` is named after the file, so a testbench that instantiates it resolves the include. The header names the snp2le version that wrote the netlist.
 
 > [!TIP]
 > The **Help** button in the top bar opens a full in-app guide to every control.
@@ -230,14 +228,14 @@ Reasonable ceilings:
 Why those two limits, and what an out-of-range entry does:
 
 - **`1.00` is the floor** because it is the physical criterion itself. A lossless reciprocal structure, an ideal coupler or a lossless line, has sigma_max exactly 1, so a floor below 1 would reject networks that are perfect.
-- **`1.20` is the ceiling** because past roughly 20 % of voltage gain (1.44x in power, +1.6 dB) at the worst frequency there is enough excess energy to grow a transient run without bound. It is also well clear of anything real: across the bundled examples an acceptable fit lands between 1.00 and 1.02, and a broken one jumps straight to 2.18 or 5.24. Nothing useful lives in between.
+- **`1.20` is the ceiling** because past roughly 20 % of voltage gain (1.44x in power, +1.6 dB) at the worst frequency there is enough excess energy to grow a transient run without bound. It is also well clear of the bundled examples: at orders 6 and 13 their raw fits stay at or below 1.02, the WPD at order 6 reaches 1.08, and a broken fit jumps to 2.18 or 5.24.
 - **A number outside the range is replaced by the limit it overshot.** Type `9.9` and the field shows `1.20`, type `0.5` and it shows `1.00`. That is deliberate: the field teaches you the limits without anyone reading this paragraph first. Text that is not a number at all has no limit to snap to, so it falls back to `1.00`. The CLI is stricter and refuses the run outright rather than substituting, since a batch script silently getting a different ceiling than it asked for is worse than a visible error.
 
 **A ceiling is not always reachable.** The perturbation only moves the model's residues, so a violation band that runs to infinity, caused by a non-passive constant term, cannot be corrected at any ceiling. The bundled `tline_100um_ihp-sg13g2.s2p` at order 13 is one: its constant term sits at 5.24. A file that carries a 0 Hz point, as this one does, then also gets a refit that includes it, which scikit-rf meets through the constant term, so the refit lands on another model and is kept if it clears the ceiling and fits closer than a lower-order refit. The line at order 13 comes out passive that way, at model order 9 and an RMS error of 1.5e-3, with scikit-rf 1.12 and 2.1.0 alike. Like the lower-order refit, a passing refit replaces the accurate near-passive fit even at a larger error (the 500 pH coil with a 0 Hz point added, at order 6: 7.0e-5 becomes 3.7e-2), and with **Thermal noise** ticked a strictly passive candidate wins over one that only meets a raised ceiling, since only it can carry the noise. The refit needs a fit range that starts at the file's first sample above 0 Hz. When nothing reaches the ceiling, the accurate fit is kept rather than a wrecked one, and the result reads *near-passive*. The fix is a lower **Max order**, not a higher ceiling, since order 6 brings the same file to 0.9997 by plain perturbation. Whenever the constant term D, the model's value at infinite frequency, is above the ceiling, the message line says so with its sigma, so this case cannot be mistaken for a violation inside your band.
 
 The **Result** panel reports the measured sigma_max next to the ceiling it was judged against, green inside the ceiling and red outside it, so a raised ceiling never reads as a clean pass without the number that earned it. When there is a violation, the message line under the panel (and the CLI's `note:` line) names the frequency of the peak. Read it before you decide what to do:
 
-- **At 0 Hz or inside your band**: a real hazard. Enforce, or raise the order.
+- **At 0 Hz or inside your band**: a real hazard for a transient run or a DC operating point. Enforce, or raise the order. An AC or S-parameter sweep of a band far above 0 Hz does not see a peak at 0 Hz, which is why the raised-ceiling examples above can accept one.
 - **Far above the top data point**, at 10^4 times it or so: that is the model's high-frequency asymptote, not a resonance. It usually means the fit order is too high for the file. The bundled `tline_100um_ihp-sg13g2.s2p` without enforcement reaches sigma_max = 5.24 at order 13, at 10^4 times its top data point, and only 1.018 at order 6.
 
 ### The 0 Hz point
@@ -252,6 +250,7 @@ Some files carry a 0 Hz sample, an EM solver's DC point. The bundled `ind_d20_w7
 - The pin is checked before it is kept. It is skipped, with a note saying why, if it would take a frequency where the fit is passive to sigma_max 1 or above (checked from 0.16 Hz up through the band), move the fitted band by more than the fit's own RMS error, or make the DC operating point singular. The last happens when the fit nearly shorts a port at DC, so that the correction would have to cancel a large conductance. A file whose 0 Hz point shorts a port is named as such, since no finite conductance meets it. The passivity result and the thermal-noise generator stay those of the fit.
 - It acts in universal mode on a file with a finite 0 Hz sample, also when the fit range starts above it. A file without one sees no change, and the CLI warns when a pin option was given for it. Structure modes drop the 0 Hz point, since their extraction divides by the frequency, and the wideband inductors fit their DC resistance themselves.
 - `--dc-island-leak S` gives each DC mode without a path to ground (the common mode of a series coil, both terminals of a capacitor) that conductance, which can help a harmonic-balance run converge. It is 0 by default, so the model keeps the file's DC behaviour, apart from the 1e-8 S of the clip.
+- The corner and the island leak have no control in the window, but a design file saved with *Save design* carries them, and one written by hand or a script can set them. A value that differs from the default, from the CLI or from a loaded design, is named at the end of the pin's note, for example `Non-default settings: corner 1 kHz (default 160 Hz)`, which the GUI shows in the message line of the Conversion panel. *Reset* returns both to the defaults.
 
 What it costs, below the corner the model is the pin's rather than the fit's:
 
@@ -268,10 +267,12 @@ A universal model cannot take that noise from its own resistors, which place the
 
 - snp2le computes a noise generator from the fitted model itself, the spectral factor of I - S S<sup>H</sup> given by the bounded-real lemma, and appends it to the subcircuit.
 - N resistors of 0.25 ohm, one per port, are its only noise sources (`Rnz_e1` to `Rnz_eN`), since 4kTR = kT is the noise power a matched port emits. They drive a copy of the model's state dynamics (`Cnz_x*` and controlled sources `Gnz_*`), which injects the noise waves into each port's internal sensor node.
-- Nothing feeds back into the fitted network, so its S-parameters, its DC operating point and everything else the conversion reports stay exactly what they are without the option.
+- Nothing feeds back into the fitted network, so its S-parameters and its DC operating point stay what they are without the option. The option only steers passivity enforcement at a raised ceiling, where a strictly passive candidate then wins (see [Passivity and the passivity ceiling](https://github.com/iic-jku/snp2le#passivity-and-the-passivity-ceiling)).
 - The noise follows the simulator temperature like any resistor's, while the S-parameters do not change with it.
 - In a noise analysis the block's share is the sum of its `Rnz_e*` entries. Both dialects carry the generator, the simulators differ in which analyses see it. VACASK sees it in `noise`, `hbnoise`, `pnoise` and transient noise (`noisemode="sde"`). Ngspice sees it in `.noise` only, since it has no periodic noise analysis and adds no resistor noise to a transient run, so a mixer's noise figure through a fitted passive is a VACASK job.
 - The netlist grows by about 2N + 3 lines per state, where a model has N times its model order states: the bundled WPD at order 6 (fitted at model order 4, 12 states) gains 113 lines, a 7-port at order 23 goes from 1892 to 4659.
+
+The *Result* panel's *noise* row says what the netlist carries: *noiseless*, *thermal (R) ✓* in green once the generator is added, *NOT added* in red when it cannot be, and *thermal (R)* for a structure model with resistors, which carry their own noise.
 
 **It needs a strictly passive model.** The generator exists only where sigma_max stays below 1 at every frequency, far outside the data included, so keep *Enforce passivity* ticked at a ceiling of `1.00`. When the model still is not strictly passive (a raised ceiling, enforcement off, or a fit enforcement cannot fix), no noise is added and the message names the model's sigma_max. When the cause is the constant term D, which enforcement cannot change, the message names D, and another **Max order** is the knob that is left. The GUI still shows the model and its plots, its Result panel reads *NOT added*, and Export refuses. The CLI writes no file, removes one an earlier run left at that path, and exits non-zero. A noiseless netlist under a name you asked to be noisy would otherwise enter a noise budget unnoticed.
 
@@ -294,10 +295,7 @@ Structure models need no option. Their resistors are the structure's loss and al
 
 ### Watching a conversion
 
-Every conversion runs on a worker thread, so the window stays usable while it
-runs. Progress shows in the **Conversion** panel, under the loaded file name and
-directly above the Result rows it fills in, and is mirrored into the **Plot**
-view's header row so switching views does not lose sight of a running fit:
+Every conversion runs on a worker thread, so the window stays usable while it runs. Progress shows in the **Conversion** panel, under the loaded file name and directly above the Result rows it fills in, and is mirrored into the **Plot** view's header row so switching views does not lose sight of a running fit:
 
 | While it runs | When it ends |
 | --- | --- |
@@ -305,31 +303,21 @@ view's header row so switching views does not lose sight of a running fit:
 | how long it has been running | the total time, in green next to it |
 | a progress bar tracking the real work, not a step count | the bar, full, and all of it stays until the next conversion starts |
 
-Both indicators sit inside panels that already existed, so neither costs any
-window height.
+Both indicators sit inside panels that already existed, so neither costs any window height.
 
 Two figures are deliberately absent:
 
-- **No estimated time left.** The fraction is not linear in time and cannot be:
-  the fit stage reports a saturating curve, because how many iterations
-  `auto_fit` will take is not knowable in advance. Any remaining-time number
-  derived from it would be guesswork dressed as a measurement.
-- **No result summary on the completion line.** The pole count and RMS error are
-  in the Result rows a few lines below it.
+- **No estimated time left.** The fraction is not linear in time and cannot be: the fit stage reports a saturating curve, because how many iterations `auto_fit` will take is not knowable in advance. Any remaining-time number derived from it would be guesswork dressed as a measurement.
+- **No result summary on the completion line.** The pole count and RMS error are in the Result rows a few lines below it.
 
 More details worth knowing:
 
-- Nothing is hidden once a conversion has started: dragging a spin box moves the
-  bar and rewrites two labels, where showing and hiding them would strobe.
-- A failed conversion reads red and leaves the bar where it stopped rather than
-  filling it, since the attempt did not complete.
-- Changing controls during a fit does not queue one conversion per change. The
-  running fit finishes, then the newest settings are converted, once.
-- If a long fit finishes while you are in another window, the taskbar entry
-  flashes. The result is also just there when you come back.
+- Nothing is hidden once a conversion has started: dragging a spin box moves the bar and rewrites two labels, where showing and hiding them would strobe.
+- A failed conversion reads red and leaves the bar where it stopped rather than filling it, since the attempt did not complete.
+- Changing controls during a fit does not queue one conversion per change. The running fit finishes, then the newest settings are converted, once.
+- If a long fit finishes while you are in another window, the taskbar entry flashes. The result is also just there when you come back.
 
-**Export** writes the conversion that finished, so it is disabled while one is
-running and never blocks the window to re-fit.
+**Export** writes the conversion that finished, so it is disabled while one is running and never blocks the window to re-fit.
 
 A conversion runs its linear algebra on one thread of the BLAS library (through [threadpoolctl](https://github.com/joblib/threadpoolctl)). Its matrices are small, so a thread pool costs more than it saves: a 7-port receiver core at order 24 with thermal noise converts in 2.2 s instead of 15 minutes with the default 14 threads. Set `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` to choose the count yourself. A simulator started from snp2le keeps its own threads. A program that runs several conversions at once in threads gets its own thread count and its console back when the last one finishes.
 
@@ -353,14 +341,14 @@ The testbenches follow the `plot_simulations` structure of the [ihp-sg13g2-ams-c
 - `ngspice2python.py` is the helper module that loads the `wrdata` columns (the same helper the [ihp-sg13g2-ams-chip-template](https://github.com/iic-jku/ihp-sg13g2-ams-chip-template) plotting scripts use).
 - `sparam_plot.py` holds the figure layout both plot scripts draw through, so the Ngspice and VACASK results are directly comparable. An N-port testbench has N x N S-parameters, which is unreadable in a single pair of axes, so the figure is split by excitation port: one column of axes per driven port j, magnitude on top and phase below, leaving only N traces per panel. The color encodes the receiving port i and is the same in every panel, so one legend serves the whole figure.
 
-One script serves every port count: it discovers the exported vectors from the table header (Ngspice) or the `s(i,j)` vector names (VACASK). Without an argument every `*_tb_acsp_ngspice` table in `data/` is plotted; with a testbench name only that one:
+One script serves every port count: it discovers the exported vectors from the table header (Ngspice) or the `s(i,j)` vector names (VACASK). Without an argument every `*_tb_acsp_ngspice` table in `data/` is plotted. With a testbench name, only that one is:
 
 ```bash
 python3 testbenches/xschem/plot_simulations/plot_n_port_tb_acsp_ngspice.py
 python3 testbenches/xschem/plot_simulations/plot_n_port_tb_acsp_ngspice.py two_port_tb_acsp_ngspice
 ```
 
-The plot windows open when a display is available; headless, only the PNGs are written.
+The plot windows open when a display is available. Headless, only the PNGs are written.
 
 ### Run the tests
 
@@ -384,10 +372,10 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 
 | Option | Scope | Description |
 | --- | --- | --- |
-| `inputs` | all | one or more `.sNp` files or globs |
+| `inputs` | both | one or more `.sNp` files or globs |
 | `--mode universal\|structure` | both | conversion philosophy (default `universal`) |
-| `--structure KEY` | structure | structure key (see `list-structures`) |
-| `--order N` | universal | maximum model order, counted as `n_real + 2 x n_complex` |
+| `--structure KEY` | structure | structure key (see `list-structures`, default `inductor-pi`) |
+| `--order N` | universal | maximum model order, counted as `n_real + 2 x n_complex`, 2 or more (default 6) |
 | `--passive` / `--no-passive` | universal | enforce passivity (default on) |
 | `--passivity-ceiling SIGMA` | universal | sigma_max the enforcement works towards, `1.0` to `1.2`, needs `--passive` (default `1.0`) |
 | `--thermal-noise` / `--no-thermal-noise` | universal | add the passive's thermal noise, kT(I - S S<sup>H</sup>) at the ports, or emit the noiseless model (default noiseless). A model that is not strictly passive cannot carry it: nothing is written and the exit code is non-zero |
@@ -396,25 +384,25 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--dc-island-leak S` | universal | conductance to ground for each DC mode without a DC path, which can help harmonic balance converge (default 0) |
 | `--fext FREQ` | structure | extraction frequency, e.g. `7GHz` (default 10 GHz). The wideband inductors have none |
 | `--fmin FREQ` | both | lowest frequency used for the fit (default: the file's first point) |
-| `--fmax FREQ` | both | highest frequency used for the fit (default: the file's last point) |
-| `--stages N` | structure | RLGC ladder cells (transmission line), 1 to 10 |
-| `--iso-r` / `--no-iso-r` | structure | Wilkinson isolation R or branch-line arm loss |
+| `--fmax FREQ` | both | highest frequency used for the fit, above 0 Hz (default: the file's last point) |
+| `--stages N` | structure | RLGC ladder cells (transmission line), 1 to 10 (default 2) |
+| `--iso-r` / `--no-iso-r` | structure | in-phase Wilkinson isolation R or branch-line arm loss (default on) |
 | `--basic` | structure | fixed basic topology for the wideband inductors: 1 coil segment, 1 skin section, no substrate coupling |
 | `--segments N` | structure | wideband inductors: fixed coil segment count, 1 to 10, per half for `inductor-ct` (default: the fit picks the fewest of 1 to 3 within 10 % of the best) |
 | `--substrate VARIANT` | structure | wideband inductors: `auto`, `symmetric`, `asymmetric`, `symmetric+coupling` or `asymmetric+coupling` (`inductor-ct`: no coupling), default `auto` |
 | `--peak-q-weight [A]` | structure | wideband inductors: weight L and Q up to 1+A times near the Q peak (A = 2 without a value) |
 | `--shunt-accuracy [K]` | structure | wideband inductors: measure substrate errors against at least K x the series branch, for measured or FDTD data (K = 0.01 without a value) |
 | `--ct-port {1,2,3}` | structure | `inductor-ct`: center tap port (default: detected from the data) |
-| `--format ngspice\|vacask\|both` | both | output dialect(s). VACASK writes `.inc` |
-| `-o, --output PATH` | both | output path (single input), names the `.SUBCKT` |
+| `--format ngspice\|vacask\|both` | both | output dialect(s), default `ngspice`. VACASK writes `.inc` |
+| `-o, --output PATH` | both | output path (single input), names the `.SUBCKT`. A file stem that is not a valid name in both dialects is changed for the `.SUBCKT` (`my-model` to `my_model`), with a warning |
 | `--values` | both | print the element values (extracted, or the synthesised network's) |
-| `--tolerances` | structure | print per-element tolerances at `f_ext` |
+| `--tolerances` | structure | print per-element tolerances at `f_ext` (the inductor, MIM capacitor, line and balun models) |
 | `--simulate SCH` | sim | run an Xschem testbench after converting |
 | `--simulator ngspice\|vacask` | sim | simulator for `--simulate` (default: auto from `.sch` name) |
 | `--show-output` | sim | show the simulator's console and plot windows |
 | `--timeout S` | sim | seconds to wait for a `--simulate` result (default 180) |
 | `--plot [SPARAMS]` | both | display data-vs-model plots, plus the sim overlay after `--simulate` (e.g. `S11,S21`) |
-| `--quiet` | both | suppress the per-file status line (and the progress bar) |
+| `--quiet` | both | suppress the per-file status and `note:` lines (and the progress bar). `[FAIL]` and `[WARN]` lines stay |
 | `--progress` / `--no-progress` | both | force the progress bar on or off (default: on when stderr is a terminal) |
 
 ### Examples
@@ -488,7 +476,7 @@ New structures plug in by subclassing `snp2le.core.structures.base.Structure` an
 - **Center tap.** `inductor-ct` fits a 3-port with two coil ends and the center tap: two half coils coupled with k, R<sub>ct</sub> to the center tap and a substrate network under it, with the inductances, resistances and substrate of the halves tied separately where the data is symmetric. The center tap is the port the data puts in the middle of the coil, where the two coil ends share the weakest transfer admittance, and the Conversion panel names it. *Center tap* (`--ct-port`) sets it instead. The netlist keeps the file's port order. k is the effective coupling including the center tap lead inductance, which terminal data cannot separate from M.
 - **Basic model** (`--basic`) fixes the topology at 1 segment, 1 skin section and no substrate coupling, so every fit has the same elements, e.g. for machine-learning data tables.
 - **Peak-Q weight** (`--peak-q-weight`, A = 2) weights L and Q up to 1+A times where the data's Q is at least 0.8 x its peak, e.g. for a VCO tank. On the 500 pH example it takes the basic model's Q error near the peak from 4.2 % to 1.6 %, at a little more error elsewhere.
-- **Measured data** (`--shunt-accuracy`, K = 0.01) is for measured or FDTD data. At low frequency the substrate branch is 1e-4 to 1e-3 of the series branch, so a small absolute error in the data swamps it. The option measures substrate errors against at least K x the series branch. On a synthetic coil with S noise of 1e-3 it brings C<sub>ox</sub> from 18 % to 29 % off back to within 6 %. Clean EM data (e.g. Palace) does not need it.
+- **Measured data** (`--shunt-accuracy`, K = 0.01) is for measured or FDTD data. At low frequency the substrate branch is a tiny fraction of the series branch (on the 500 pH coil 3e-6 at 10 MHz, 2e-4 at 0.5 GHz, 1.6e-3 at 2 GHz), so a small absolute error in the data swamps it. The option measures substrate errors against at least K x the series branch. On a synthetic coil with S noise of 1e-3 it brings C<sub>ox1</sub> from 18 % to 29 % off back to within 6 % on three noise draws. Clean EM data (e.g. Palace) does not need it.
 - **Keep the low-frequency data.** It is what determines the DC resistance and inductance, so a *Fit range* that starts above the file's first point is reported as extrapolated.
 
 The GUI offers the two weights at their defaults and *Segments* from 1 to 3. Other weights, up to 10 segments and `--substrate` are CLI options.
@@ -525,7 +513,7 @@ On `ind_500pH_ihp-sg13cmos5l.s2p` (10 MHz to 50 GHz) the fit picks 3 segments an
 
 Licensed under the **Apache License 2.0**, see [`LICENSE`](https://github.com/iic-jku/snp2le/blob/main/LICENSE).
 
-The repository is [REUSE](https://reuse.software) compliant: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier` tags, either inline (source files) or through [`REUSE.toml`](https://github.com/iic-jku/snp2le/blob/main/REUSE.toml) for files that cannot hold a header (configs, schematics and symbols, generated netlists, example Touchstone data, figures and result tables). The [License Check](https://github.com/iic-jku/snp2le/actions/workflows/license-check.yml) workflow runs `reuse lint` on every push and pull request to `main`, so a new file without licensing information fails CI. Check it locally with:
+The repository is [REUSE](https://reuse.software) compliant: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier` tags, either inline (source files) or through [`REUSE.toml`](https://github.com/iic-jku/snp2le/blob/main/REUSE.toml) for files that cannot hold a header (configs, Xschem symbols, generated netlists, example Touchstone data, figures and result tables). The [License Check](https://github.com/iic-jku/snp2le/actions/workflows/license-check.yml) workflow runs `reuse lint` on every push and pull request to `main`, so a new file without licensing information fails CI. Check it locally with:
 
 ```bash
 pip install 'reuse[charset-normalizer]'

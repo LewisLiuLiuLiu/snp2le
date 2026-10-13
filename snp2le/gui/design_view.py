@@ -3,9 +3,9 @@
 """design_view.py - the "Design & Schematic" page.
 
 Left: a "Conversion" panel with the loaded-file header, the fit/extraction result
-(RMS, passivity, order/Q), and the element-values table.  Right: the schematic
-panel (drawn for physical models, a note for the universal macromodel) above the
-netlist panel (Ngspice / VACASK tabs with export buttons).
+(RMS, passivity, order or extraction frequency, noise), and the element-values table.
+Right: the schematic panel (drawn for physical models, a note for the universal
+macromodel) above the netlist panel (Ngspice / VACASK tabs, exported from the top bar).
 """
 from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
@@ -27,6 +27,12 @@ _ROW_GAP = 3
 # A longer values table (the wideband inductors, up to 24 elements) goes in two columns, so
 # the panel keeps its height.  Every other structure has at most 9 values and one column.
 _ONE_COLUMN_ROWS = 12
+
+
+def _value_text(val, unit):
+    """An element value as the CLI prints it: SI prefix with a unit, a plain number for a
+    dimensionless one (k 0.434, not 434 m)."""
+    return format_eng(val, unit) if unit else f"{val:.4g}"
 
 
 def _panel(title):
@@ -92,9 +98,10 @@ class DesignView(QtWidgets.QWidget):
             "The message line below names that frequency. A peak far above the data is "
             "the model's high-frequency\nasymptote, which usually means the order is too "
             "high for the file.\n"
-            "Untick 'Enforce passivity' in the top bar to raise the bound and keep the "
-            "more accurate fit.")
-        self.order_out = OutputField("order / Q", "\u2014", label_w=100, equals=False)
+            "Raise the Passivity ceiling in the top bar to keep a more accurate fit "
+            "under a looser bound.\nUnticking 'Enforce passivity' exports the raw fit, "
+            "still judged against 1.00.")
+        self.order_out = OutputField("order", "\u2014", label_w=100, equals=False)
         self.noise_out = OutputField("noise", "\u2014", label_w=100, equals=False)
         self.noise_out.setToolTip(
             "What the netlist carries as noise.\n"
@@ -103,11 +110,12 @@ class DesignView(QtWidgets.QWidget):
             "thermal (R) ✓ in green: 'Thermal noise' added the passive's own noise,\n"
             "kT(I - S S^H) at the ports, from a generator of noisy resistors computed from\n"
             "the fit.\n"
-            "NOT added: the model is not strictly passive, so no such generator exists.\n"
+            "NOT added: no such generator exists, mostly because the model is not\n"
+            "strictly passive.\n"
             "The message line below says why, and Export refuses until it is fixed or\n"
             "'Thermal noise' is unticked.\n"
             "thermal (R) without colour: a structure model, whose resistors are real loss\n"
-            "and always carry their noise.")
+            "and always carry their noise. One without resistors reads noiseless.")
         for i, w in enumerate((self.mode_out, self.band_out, self.rms_out, self.pass_out,
                                self.sigma_out, self.order_out, self.noise_out)):
             if i:
@@ -233,8 +241,8 @@ class DesignView(QtWidgets.QWidget):
             # the field is shared with structure mode, so the tooltip moves with the label
             self.order_out.setToolTip(
                 "Model order of the fit, n_real + 2 x n_complex, so it never exceeds Max "
-                "order in the top bar. It is also the number of internal states in the "
-                "netlist. In brackets the poles kept, a conjugate pair counted once.")
+                "order in the top bar. It is also the number of internal states per port "
+                "in the netlist. In brackets the poles kept, a conjugate pair counted once.")
         elif getattr(getattr(res, "_structure", None), "wideband", False):
             f_top = res.metrics.get("f_fit_max")
             self.order_out.label.setText("fitted up to")
@@ -266,13 +274,13 @@ class DesignView(QtWidgets.QWidget):
             grid.setHorizontalSpacing(16); grid.setVerticalSpacing(4 + _ROW_GAP)
             per_col = (len(res.value_rows) + 1) // 2          # top to bottom, then right
             for i, (label, val, unit) in enumerate(res.value_rows):
-                of = OutputField(label, format_eng(val, unit), label_w=76,
+                of = OutputField(label, _value_text(val, unit), label_w=76,
                                  equals=True, field_w=96)
                 grid.addWidget(of, i % per_col, i // per_col)
             self.values_host.addWidget(host, alignment=QtCore.Qt.AlignHCenter)
         elif res.physical and res.value_rows:
             for label, val, unit in res.value_rows:
-                of = OutputField(label, format_eng(val, unit), label_w=52,
+                of = OutputField(label, _value_text(val, unit), label_w=52,
                                  equals=True, field_w=128)
                 self.values_host.addWidget(of, alignment=QtCore.Qt.AlignHCenter)
         else:

@@ -30,6 +30,18 @@ _WPD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "snp2le", "examples", "wpd_ihp-sg13g2.s3p")
 
 
+def test_a_structure_without_resistors_reads_noiseless():
+    """The branch-line coupler without Resistive loss has no resistor that carries noise (its
+    loop resistor is noiseless), so its noise row says so."""
+    from snp2le.core import engine
+    net = io.load_touchstone(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "snp2le", "examples", "blc_ihp-sg13g2.s4p"))
+    for iso, label in ((False, "noiseless"), (True, "thermal (R)")):
+        res = engine.convert(ConverterState(mode="structure", structure_key="branchline",
+                                            iso_resistor=iso), net)
+        assert noise_text(res) == label
+
+
 def test_noise_text_names_what_the_netlist_carries():
     """Pure function, no window."""
     assert noise_text(Results(ok=True, mode="universal")) == "noiseless"

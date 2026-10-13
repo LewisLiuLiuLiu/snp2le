@@ -24,8 +24,9 @@ be read is reported and the example is loaded instead.</li>
   <ul>
   <li><b>Universal</b> (any N-port): vector-fits the S-parameters into a passive
   macromodel of R, C and controlled sources. Works for any structure and port count.
-  Electrically exact but not physically interpretable. Its <b>Max&nbsp;order</b> and
-  <b>Enforce&nbsp;passivity</b> controls sit next to the (greyed) Structure box.</li>
+  Electrically exact but not physically interpretable. Its <b>Max&nbsp;order</b>,
+  <b>Enforce&nbsp;passivity</b>, <b>Passivity&nbsp;ceiling</b> and <b>Thermal&nbsp;noise</b>
+  controls sit next to the (greyed) Structure box.</li>
   <li><b>Structure-specific</b>: fits a known physical topology, so every component maps
   to reality. Its <b>extraction frequency</b> and any model-specific option sit next to
   the Structure box.</li>
@@ -52,13 +53,17 @@ does not match the loaded file are greyed out:
   inductance.</li>
 <li><b>f<sub>ext</sub></b> (structure mode): the single frequency at which the lumped
 values are read off the data. Accepts engineering notation (e.g. <i>7&nbsp;GHz</i>). If
-it is outside the data it falls back to the device's natural design point. The wideband
+it is outside the data or the fit range, the Wilkinson dividers and the branch-line coupler
+fall back to their design point (best match), the balun to mid-band, and the inductor, MIM
+capacitor and line to the nearest data point. The message line names the frequency used.
+The wideband
 inductors have no extraction frequency and show their own options in its place (below).</li>
 <li><b>Max order</b> (universal mode): the largest model order the vector fit may use,
-counted as n<sub>real</sub> + 2 x n<sub>complex</sub>, which is also the number of internal
-states in the netlist. A higher order tracks sharp resonances but enlarges the netlist. The
-<i>order</i> line in the Result panel reports the order the fit settled on and, in brackets,
-its pole count, where a complex-conjugate pair counts once.</li>
+counted as n<sub>real</sub> + 2 x n<sub>complex</sub>, which is the number of internal
+states per port in the netlist (an N-port has N times that). A higher order tracks sharp
+resonances but enlarges the netlist. The <i>order</i> line in the Result panel reports the
+order the fit settled on and, in brackets, its pole count, where a complex-conjugate pair
+counts once.</li>
 <li><b>Enforce passivity</b> / <b>Passivity ceiling</b> (universal mode): a model is
 <i>passive</i> when the largest singular value of its S-matrix, &sigma;<sub>max</sub>,
 stays at or below 1 at every frequency, which is the same as saying it can never deliver
@@ -95,13 +100,14 @@ term, cannot be corrected at any ceiling. <tt>tline_100um_ihp-sg13g2.s2p</tt> at
 has its constant term at 5.24. A file that carries a 0 Hz point, as this one does, then
 also gets a refit that includes it, which scikit-rf meets through the constant term, and
 it is kept if it passes and fits closer than a lower-order refit (the line comes out passive
-at model order 9 that way). With <b>Thermal noise</b> ticked, a strictly passive candidate wins
-over one that only meets a raised ceiling, since only it can carry the noise. When nothing reaches the ceiling, the
-accurate fit is kept rather than a wrecked one and the result reads <i>near-passive</i>.
-The fix is a lower <b>Max order</b>, not a higher ceiling, since order 6 brings the same
-file to 0.9997. Whenever the constant term D,
-the model's value at infinite frequency, is above the ceiling, the message line says so with
-its singular value.</p></li>
+at model order 9 that way). The refit needs a fit range that starts at the file's first
+sample above 0&nbsp;Hz. With <b>Thermal noise</b> ticked, a strictly passive candidate wins
+over one that only meets a raised ceiling, since only it can carry the noise. When nothing
+reaches the ceiling, the accurate fit is kept rather than a wrecked one and the result
+reads <i>near-passive</i>. The fix is a lower <b>Max order</b>, not a higher ceiling, since
+order 6 brings the same file to 0.9997. Whenever the constant term D, the model's value
+at infinite frequency, is above the ceiling, the message line says so with its singular
+value.</p></li>
 <li><b>Thermal noise</b> (universal mode): a lossy passive at temperature T is a noise
 source, and its noise follows from its S-parameters alone, kT(I&nbsp;&minus;&nbsp;S&nbsp;S<sup>H</sup>)
 at its ports (Bosma's theorem). Unticked (the default), the model is noiseless, an ideal
@@ -114,8 +120,9 @@ analysis shows the block's noise as the sum of its <tt>Rnz_e*</tt> contributions
 sees it in <tt>noise</tt>, <tt>hbnoise</tt>, <tt>pnoise</tt> and transient noise, Ngspice in
 <tt>.noise</tt> only, since it has no periodic noise analysis and adds no resistor noise to a
 transient run. The noise is only as good as the loss in the S-parameter data.
-<p><b>It needs a strictly passive model</b>, so keep <b>Enforce passivity</b> ticked at
-<i>1.00</i>. If the model is not strictly passive anywhere, far outside the data included,
+<p><b>It needs a strictly passive model</b>, so keep <b>Enforce passivity</b> ticked and
+the <b>Passivity ceiling</b> at <i>1.00</i>. If the model is not strictly passive at every
+frequency, far outside the data included,
 no generator exists: the noise is not added, the <i>noise</i> result reads <i>NOT added</i>,
 the message line names &sigma;<sub>max</sub>, and <b>Export</b> refuses until it is fixed
 or the box is unticked. Structure models need no option: their resistors are the
@@ -171,7 +178,7 @@ inductors):
   </ul>
   The CLI also takes other weights, up to 10 segments and a fixed substrate network
   (<tt>--peak-q-weight</tt>, <tt>--shunt-accuracy</tt>, <tt>--segments</tt>,
-  <tt>--substrate</tt>, <tt>--ct-port</tt>).</li>
+  <tt>--substrate</tt>).</li>
 <li><b>View</b>: the two-segment switch at the right of the title bar, holding
 <i>Design&nbsp;&amp;&nbsp;Schematic</i> and <i>Plot</i> side by side. The view you are on
 is the filled one, and one click moves to the other. It follows the plots too: popping
@@ -204,16 +211,25 @@ running.</li>
 
 <h3>Design &amp; Schematic</h3>
 <ul>
+<li><b>Load design</b> / <b>Save design</b> (top of the Conversion panel): save every
+conversion setting and the path of the loaded file as JSON, and load it back, which also
+reloads that file. A design written by hand or by a script can carry the CLI's DC pin
+corner and island leak, which the window has no control for and keeps until
+<b>Reset</b>. Whenever the DC pin acts, its note in the message line names those that
+differ from the defaults.
+A design that names no file, or one that cannot be read, is applied to the file already
+loaded, and a dialog names a file that is missing.</li>
 <li><b>Result</b>: fit/extraction quality. RMS error against the data, passivity,
 &sigma;<sub>max</sub> against the ceiling it was judged against (green below the
 ceiling, red above it), the model order (universal), the extraction frequency (structure)
 or the top of the fitted band (wideband inductors),
-and the <i>noise</i> the netlist carries: <i>noiseless</i>, <i>thermal (R) &#10003;</i> in green when
-<b>Thermal noise</b> added the generator, <i>NOT added</i> (red) when the model could not
+and the <i>noise</i> the netlist carries: <i>noiseless</i>, <i>thermal (R) &#10003;</i> in
+green when <b>Thermal noise</b> added the generator, <i>NOT added</i> (red) when the model could not
 carry it, or <i>thermal (R)</i> without colour for a structure model, whose resistors carry
-their own noise.
-Passivity reads <i>passive</i> below 1, <i>below ceiling</i> when a raised ceiling was
-reached, <i>near-passive</i> when enforcement ran and could not reach it, and <i>not
+their own noise. A structure model without resistors, such as the branch-line coupler
+without <b>Resistive loss</b>, reads <i>noiseless</i>.
+Passivity reads <i>passive &#10003;</i> below 1, <i>below ceiling &#10003;</i> when a raised
+ceiling was reached, <i>near-passive</i> when enforcement ran and could not reach it, and <i>not
 passive</i> when the model is above its ceiling. Structure models are passive by
 construction, so they show no &sigma;<sub>max</sub>. When there is a violation, the
 message line under the panel also names the frequency of the peak: at 0&nbsp;Hz or inside
@@ -228,8 +244,9 @@ the order or enable passivity, before you hand the netlist to a simulator.</li>
 C, k, M) for a physical model, or a summary of the synthesised network for the
 universal macromodel. The schematic draws component <i>names</i> only. The numeric values
 live here.</li>
-<li><b>Tolerances</b> (structure models with an extraction frequency, so not the wideband
-inductors): the per-element agreement at the extraction
+<li><b>Tolerances</b> (the inductor, MIM capacitor, line and balun models: the Wilkinson
+dividers and the branch-line coupler are synthesised from their design frequency, and the
+wideband inductors are fitted over the band): the per-element agreement at the extraction
 frequency, |data&nbsp;&minus;&nbsp;model|&nbsp;/&nbsp;model in&nbsp;%. Directly-read
 reciprocal terms (a series L, R) read about 0&nbsp;%, because the model reproduces them
 exactly. Terms the model can only approximate (e.g. a shunt C forced symmetric across two
@@ -237,7 +254,9 @@ slightly asymmetric ports) carry the residual. The &#9675; marker on each model 
 the Plot view sits at this frequency.</li>
 <li><b>Schematic</b>: the drawn topology for a physical model. The universal macromodel
 shows a note instead.</li>
-<li><b>Netlist</b>: the generated text for both dialects, with export. <b>Ngspice</b>
+<li><b>Netlist</b>: the generated text for both dialects, in two tabs. <b>Export
+Ngspice</b> and <b>Export VACASK</b> in the top bar write it to a file, and its header
+names the snp2le version that wrote it. <b>Ngspice</b>
 (Berkeley SPICE3, <tt>.spice</tt>) and <b>VACASK</b> (Spectre syntax, <tt>.inc</tt>).
 Transformer coupling is emitted as a builtin <tt>mutual</tt> instance. Device models and
 OSDI loads come from your testbench, not the exported subcircuit. A universal macromodel's
@@ -263,14 +282,16 @@ rather than '-' in the file name to keep the file and the subcircuit identical.<
 (dashed blue), plus an imported simulation (red) once you run one. Up to <b>four</b>
 traces are shown side by side, each with its own selector: any S-parameter (magnitude in
 dB on top, phase in &deg; below), or, for structure models, an
-extracted-parameter view over frequency (e.g. L&nbsp;/&nbsp;Q for the inductor, or
+extracted-parameter view over frequency (e.g. L<sub>diff</sub>&nbsp;/&nbsp;Q for the inductor, or
 L<sub>p</sub>/R<sub>p</sub>, Q<sub>p</sub>/Q<sub>s</sub> and k/M for the balun). A
 &#9675; marker on each model curve marks the extraction frequency (structure models).</p>
 
 <p>Each plot has a live x/y read-out and a <b>marker mode</b> (the crosshair toolbar
 button): with it on, click a curve to drop a labelled data-point marker (up to three per
 plot), click a marker to remove it, right-click to clear all. The plots pop out into their
-own window and export to CSV.</p>
+own window and export to CSV. <b>Import simulation</b> loads a simulation result table by
+hand (Ngspice or VACASK, from <tt>plot_simulations/data/</tt>) and turns into <b>Clear
+simulation</b> once one is shown.</p>
 
 <h3>Simulating a testbench</h3>
 <p>To verify the netlist in a real simulator, export it, drop the subcircuit into an
@@ -302,9 +323,10 @@ log still appears in the dialog if a run fails or aborts.</li>
 <p><b>How a run's outcome is detected.</b> The two simulators report differently, so snp2le
 uses the most reliable signal for each:</p>
 <ul>
-<li><b>Ngspice</b> returns a non-zero exit code when it fails, so an error (a netlist
-problem, non-convergence, or an aborted analysis) is caught at once. A run that finishes
-and writes its result is imported as a success.</li>
+<li><b>Ngspice</b>: a non-zero Xschem exit code, or a failure line in Xschem's output, is
+reported at once. Otherwise snp2le waits up to 60&nbsp;s for the result table and reports
+<b>failed!</b> if none appears, since Xschem can return before Ngspice finishes and exits
+cleanly even when it fails. A run that writes its result is imported as a success.</li>
 <li><b>VACASK</b> is launched through Xschem, which always exits cleanly itself, and VACASK
 keeps its <i>Completed</i> / <i>Failed</i> / <i>aborted</i> messages on its own console
 rather than passing them back. So the outcome is read from the <b>result file</b>:
@@ -331,9 +353,13 @@ controlled sources), so high-order universal fits now reproduce the model in VAC
 as they do in Ngspice. No action is needed, and structure-specific models are unaffected.</p>
 
 <p>While a run is in progress the status reads <i>running...</i> (for as long as the
-simulation takes) then <i>importing...</i>, and the <b>Run Simulation</b> button becomes a
-<b>Stop</b> button you can press to cancel. A run is not killed for taking long. It is
-stopped only if it goes idle (uses no CPU for a while) and looks genuinely hung.</p>
+simulation takes, and for a VACASK run until its result appears) and then, for Ngspice,
+<i>importing...</i>. The <b>Run Simulation</b> button becomes a <b>Stop</b> button you can
+press to cancel. A run is not stopped for being slow. An Ngspice run without <b>Show
+output</b> is stopped when it has used no CPU for 60&nbsp;s and looks hung, or after
+30&nbsp;min on a system without <tt>/proc</tt>, such as Windows, where idle detection is
+not available. A VACASK run, which Xschem starts detached, ends as failed 1.5&nbsp;s after
+VACASK exits without a result. Every run has a 1&nbsp;h backstop.</p>
 
 <p style="color:#7d828c"><i>Universal mode is built on scikit-rf vector fitting. The VACASK
 passive, controlled-source (vccs, cccs) and ground (<tt>GND</tt>) handling are confirmed

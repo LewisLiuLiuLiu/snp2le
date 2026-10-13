@@ -43,6 +43,14 @@ def test_units_roundtrip():
     assert format_eng(float("nan")) == "\u2014"
 
 
+def test_format_eng_rounds_before_it_picks_the_prefix():
+    """0.9996 used to print as "1e+03 m", the CLI's --values showed state resistors so."""
+    assert format_eng(0.9996, "H") == "1 H"
+    assert format_eng(999.6, "H") == "1 kH"
+    assert format_eng(-0.0009996, "F") == "-1 mF"
+    assert format_eng(0.9994, "H") == "999 mH"
+
+
 # ---------------------------------------------------------------- universal
 def test_universal_fits_and_renders():
     net = inductor_2port()
@@ -845,6 +853,150 @@ def test_a_constant_term_above_the_ceiling_is_named():
     wpd = engine.convert(ConverterState(mode="universal", max_order=6, enforce_passivity=False),
                          _example("wpd_ihp-sg13g2.s3p"))
     assert wpd.sigma_max > 1.0 and not d_lines(wpd)
+
+
+def test_cli_picks_the_simulator_from_the_file_name():
+    """As the GUI does: a folder named vacask_runs/ must not pick VACASK for an Ngspice
+    testbench."""
+    from snp2le import cli
+    assert cli._simulator_for("tb/two_port_tb_acsp_vacask.sch") == "vacask"
+    assert cli._simulator_for("vacask_runs/two_port_tb_acsp_ngspice.sch") == "ngspice"
+
+
+def test_every_structure_has_a_solvable_dc_operating_point():
+    """VACASK aborts on a singular DC operating point where Ngspice falls back to gmin
+    stepping, so every extracted model must solve at DC on the data it is meant for (an
+    inductor model on the band-pass filter clamps its values and is not).  The lossless
+    branch-line coupler's four arm inductors used to form a loop with an undetermined
+    current."""
+    from snp2le.core import dc
+    pairs = {"ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p": ("inductor-pi",),
+             "ind_500pH_ihp-sg13cmos5l.s2p": ("inductor-pi",),
+             "mim_cap_170fF_ihp-sg13g2.s2p": ("mim-cap",),
+             "mom_cap_74fF_02_ihp-sg13cmos5l.s2p": ("mim-cap",),
+             "tline_100um_ihp-sg13g2.s2p": ("tline-rlgc",),
+             "wpd_ihp-sg13g2.s3p": ("wilkinson", "wilkinson-inphase"),
+             "blc_ihp-sg13g2.s4p": ("branchline",),
+             "balun_ihp-sg13cmos5l.s4p": ("balun", "branchline")}
+    # the wideband fits are checked in test_inductor_wideband.py, on its module fixtures
+    assert ({k for keys in pairs.values() for k in keys}
+            == {k for k, _, _ in structure_items() if not get_structure(k).wideband})
+    for name, keys in pairs.items():
+        net = _example(name)
+        for key in keys:
+            for iso in (True, False):
+                res = engine.convert(ConverterState(mode="structure", structure_key=key,
+                                                    iso_resistor=iso), net)
+                assert res.ok and dc.dc_check(res.ir).ok, (name, key, iso)
+
+
+def test_the_lossless_branchline_keeps_its_response():
+    """The loop resistor moves S by about 1e-8 and stays out of the noise and the values."""
+    import copy
+    from snp2le.core import mna
+    net = _example("blc_ihp-sg13g2.s4p")
+    res = engine.convert(ConverterState(mode="structure", structure_key="branchline",
+                                        iso_resistor=False), net)
+    loop = next(e for e in res.ir.elements if e.name == "Rloop")
+    assert loop.value == 1e-6 and loop.noisy is False
+    assert "Rloop n0 p2 1e-06 noisy=0" in res.ngspice
+    assert all(lab != "R_loop" for lab, _, _ in res.value_rows)
+    ideal = copy.deepcopy(res.ir)                     # the same model with the loop closed
+    ideal.elements = [e for e in ideal.elements if e.name != "Rloop"]
+    for e in ideal.elements:
+        e.nodes = tuple("p2" if n == "n0" else n for n in e.nodes)
+    f = net.f[::10]
+    assert np.max(np.abs(mna.rlc_sparams(res.ir, f) - mna.rlc_sparams(ideal, f))) < 1e-6
+
+
+def _example_path(name):
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "snp2le", "examples", name)
+
+
+def test_cli_refuses_numbers_out_of_range():
+    import pytest
+    from snp2le import cli
+    p = cli.build_parser()
+    for bad in (["--order", "1"], ["--order", "x"], ["--fmin", "-5GHz"], ["--fmax", "-1"],
+                ["--fmax", "0"], ["--timeout", "0"], ["--timeout", "-1"]):
+        with pytest.raises(SystemExit):
+            p.parse_args(["convert", "x.s2p", *bad])
+    a = p.parse_args(["convert", "x.s2p"])
+    assert (a.order, a.stages, a.timeout) == (6, None, 180.0)
+    # 0 Hz is an open lower edge, while a top edge of 0 Hz would fit the whole band unasked
+    assert p.parse_args(["convert", "x.s2p", "--fmin", "0"]).fmin == 0.0
+
+
+def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
+    from snp2le import cli
+    out = str(tmp_path / "a.spice")
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--fext", "7GHz",
+                     "--stages", "4", "-o", out, "--quiet"]) == 0
+    assert "--fext, --stages ignored in universal mode" in capsys.readouterr().err
+    assert cli.main(["convert", _example_path("wpd_ihp-sg13g2.s3p"), "--mode", "structure",
+                     "--structure", "wilkinson", "--stages", "3", "--no-iso-r", "-o", out,
+                     "--quiet"]) == 0
+    assert ("--stages, --no-iso-r ignored, wilkinson has no such option"
+            in capsys.readouterr().err)
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--basic", "-o", out,
+                     "--quiet"]) == 0
+    assert ("--basic ignored, it applies to the wideband inductor structures"
+            in capsys.readouterr().err)
+    assert cli.main(["convert", _example_path("ind_500pH_ihp-sg13cmos5l.s2p"), "--mode",
+                     "structure", "--structure", "inductor-wideband", "--basic", "--stages",
+                     "3", "--no-iso-r", "-o", out, "--quiet"]) == 0
+    assert ("--stages, --no-iso-r ignored, inductor-wideband has no such option"
+            in capsys.readouterr().err)
+
+
+def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys, monkeypatch):
+    from snp2le import cli
+    out = tmp_path / "my-model.spice"
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(out),
+                     "--quiet"]) == 0
+    assert ".SUBCKT my_model " in out.read_text()
+    assert "the subcircuit is named my_model" in capsys.readouterr().err
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o",
+                     str(tmp_path / "plain.spice"), "--quiet"]) == 0
+    assert "subcircuit is named" not in capsys.readouterr().err
+    # without -o the name follows the source file, which the user did not pick
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--quiet"]) == 0
+    assert ".SUBCKT bpf_ihp_sg13g2 " in (tmp_path / "bpf_ihp-sg13g2.spice").read_text()
+    assert "subcircuit is named" not in capsys.readouterr().err
+
+
+def test_cli_input_and_output_mistakes_get_one_clear_message(tmp_path, capsys):
+    from snp2le import cli
+    rc = cli.main(["convert", str(tmp_path / "nothing*.s2p"), "--quiet"])
+    err = capsys.readouterr().err
+    assert rc == 1 and err.count("no file matches") == 1 and "Errno" not in err
+    folder = tmp_path / "outdir"
+    folder.mkdir()
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(folder),
+                     "--quiet"]) == 1
+    assert "that is a folder, -o takes a file name" in capsys.readouterr().err
+    # also with both dialects, which wrote outdir.spice beside the folder or a hidden .spice
+    # after a trailing separator, and a folder named my-dir drew the rename warning first
+    dashed = tmp_path / "my-dir"
+    dashed.mkdir()
+    for out in (str(folder), str(dashed), str(tmp_path / "new") + os.sep):
+        assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", out,
+                         "--format", "both", "--quiet"]) == 1
+        err = capsys.readouterr().err
+        assert err.count("that is a folder, -o takes a file name") == 1, err
+        assert "subcircuit is named" not in err
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == []
+
+
+def test_the_netlist_names_the_snp2le_version():
+    """So a netlist in a testbench or a paper can be traced to the tool that wrote it."""
+    import snp2le
+    res = engine.convert(ConverterState(max_order=6), _example("bpf_ihp-sg13g2.s2p"))
+    want = f"generated by snp2le {snp2le.__version__}"
+    assert res.ngspice.splitlines()[1] == f"* {want}"
+    assert res.vacask.splitlines()[0].endswith(want)
 
 
 if __name__ == "__main__":

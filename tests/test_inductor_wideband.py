@@ -126,6 +126,14 @@ def test_the_center_tap_couples_every_cell_pair(center_tap):
     assert "Rct m p3" in center_tap.ngspice                # the center tap is port 3
 
 
+def test_the_wideband_models_solve_at_dc(two_port, center_tap):
+    """VACASK aborts on a singular DC operating point. test_core.py checks the other
+    structures."""
+    from snp2le.core import dc
+    for res in (two_port, center_tap):
+        assert res.ok and dc.dc_check(res.ir).ok
+
+
 def test_the_schematic_counts_coil_segments_not_skin_inductors(two_port, center_tap):
     """Ls_1..Ls_3 are segments, Lskin1_1 is not (the first count read 9 for 3 segments),
     and the center-tapped count is per half."""
@@ -449,7 +457,7 @@ def test_the_cli_says_what_a_wideband_structure_ignores(tmp_path, capsys):
             in capsys.readouterr().err)
     assert cli.main(["convert", os.path.join(EXAMPLES, IND), "--structure",
                      "inductor-wideband", "--basic", "-o", out]) == 0
-    assert "--basic ignored, these need --mode structure" in capsys.readouterr().err
+    assert "--basic ignored, it needs --mode structure" in capsys.readouterr().err
     assert cli.main(["convert", os.path.join(EXAMPLES, IND_CT), "--mode", "structure",
                      "--structure", "inductor-ct", "--basic", "-o", out]) == 0
     assert "1 segment per half" in capsys.readouterr().out

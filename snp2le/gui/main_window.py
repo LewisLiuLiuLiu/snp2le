@@ -37,7 +37,7 @@ class MainWindow(QtWidgets.QMainWindow):
         loaded in place of the bundled example so a tool such as setupEM can open the GUI
         on the EM result it just wrote.  None opens the example, exactly as before."""
         super().__init__()
-        self.setWindowTitle("S-Parameter To Lumped Element Netlist Converter")
+        self.setWindowTitle("S-Parameter to Lumped-Element Netlist Converter")
         from .logo import logo_icon
         self.setWindowIcon(logo_icon())
         # Preferred size, but never larger than the screen: on a small laptop a fixed
@@ -164,7 +164,9 @@ class MainWindow(QtWidgets.QMainWindow):
         net = getattr(self, "net", None)
         if net is None or not len(net.f):
             return
-        lo, hi = float(net.f[0]), float(net.f[-1])
+        # the fit starts at the first sample above 0 Hz, and a 0 in the field reads as open
+        pos = net.f[net.f > 0]
+        lo, hi = float(pos[0] if len(pos) else net.f[0]), float(net.f[-1])
         if keep:
             v = self.top.values()
             lo = v["f_min"] if v["f_min"] is not None else lo
@@ -780,7 +782,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"The simulation of {os.path.basename(self._sch_path)} FAILED: it "
                 f"produced no result in\n{self._sim_output_dir()}\n\n"
                 "The simulator most likely reported an error or the analysis was "
-                "aborted - check its console / log for the cause.\n\n"
+                "aborted. Check its console or log for the cause.\n\n"
                 "If you believe it actually succeeded, use 'Import simulation' to load "
                 "the result file manually."
                 + (f"\n\n--- simulator output ---\n{log[-1500:]}" if log else ""))
@@ -867,6 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self, "Load conversion settings", "", "JSON (*.json)")
         if not path:
             return
+        loaded_path = self.state.source_path
         try:
             with open(path, encoding="utf-8") as fh:
                 self.state = ConverterState.from_json(fh.read())
@@ -877,8 +880,17 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 self.net = io.load_touchstone(self.state.source_path)
                 self.top.set_ports(self.net.nports)
-            except Exception:                             # noqa: BLE001
-                pass
+            except Exception as exc:                      # noqa: BLE001
+                # keep converting the file on screen, under its own name, so Export and
+                # Save design do not take the missing file's
+                missing, self.state.source_path = self.state.source_path, loaded_path
+                QtWidgets.QMessageBox.warning(
+                    self, "Load design",
+                    f"The design's file could not be read:\n{missing}\n\n{exc}\n\n"
+                    f"Its settings are applied to the file already loaded"
+                    + (f":\n{loaded_path}" if loaded_path else "."))
+        else:                                  # a design without a file applies to this one
+            self.state.source_path = loaded_path
         self.top.set_values(self.state)        # sync the controls to the loaded design
         self._seed_band(keep=True)             # its band wins, the file fills any gap
         self.recompute()

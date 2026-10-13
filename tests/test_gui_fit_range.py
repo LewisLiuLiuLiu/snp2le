@@ -185,3 +185,62 @@ def test_the_dc_pin_box_reaches_the_state(win, top):
     assert top.dc_pin.isChecked() and win.state.dc_pin is True
     top.set_values(ConverterState(dc_pin=False))
     assert not top.dc_pin.isChecked()
+
+
+def test_a_file_with_a_0_hz_sample_shows_where_the_fit_starts():
+    """The fit drops the 0 Hz sample, so the band starts at the first sample above it, and
+    that is what the field shows.  A 0 there read as open and left the field empty."""
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "snp2le", "examples", "ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    w = MainWindow(path)
+    try:
+        _settle(w)
+        f0, f1 = w.net.f[0], w.net.f[1]
+        shown, want = w.top.f_min.text(), w.top._ghz_text(f1)
+        f_min, limited, pin = w.state.f_min, w._res.band_limited, w._res.dc_pin
+    finally:
+        w.close()
+        app.processEvents()
+    assert f0 == 0 and shown == want != ""
+    assert f_min == f1 and not limited
+    assert pin is not None and pin.ok
+
+
+def test_a_design_with_its_own_dc_pin_settings_names_them_until_reset(tmp_path, monkeypatch):
+    """The window has no control for the pin's corner and island leak, so the message line
+    names those a loaded design set, also after a control changes, and Reset clears them."""
+    coil = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "snp2le", "examples", "ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p")
+    design = tmp_path / "design.json"
+    design.write_text(ConverterState(source_path=coil, max_order=6, dc_pin_fc=1e3,
+                                     dc_island_leak=1e-6).to_json())
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(design), ""))
+    named = ("Non-default settings: corner 1 kHz (default 160 Hz), "
+             "island leak 1e-06 S (default 0 S)")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    w = MainWindow(coil)
+
+    def settle():                       # also through the debounce a control change starts
+        deadline = time.time() + _TIMEOUT
+        while _settle(w)._timer.isActive():
+            assert time.time() < deadline, "the debounce never fired"
+            app.processEvents()
+            time.sleep(0.01)
+        return w.design.msg_lbl.text()
+
+    try:
+        settle()
+        w.on_load_design()
+        loaded = settle()
+        w.top.order.setValue(8)
+        changed = settle()
+        w.on_reset()
+        reset = settle()
+    finally:
+        w.close()
+        app.processEvents()
+    assert named in loaded and named in changed
+    assert "DC pinned" in reset and "Non-default" not in reset

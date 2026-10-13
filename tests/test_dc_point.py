@@ -212,11 +212,40 @@ def test_the_island_leak_reaches_only_the_floating_mode():
 
 
 def test_a_bad_setting_in_a_loaded_design_skips_the_pin():
+    """The skip names the setting at fault, also for a leak that is no number, which used to
+    be blamed on the corner."""
     net = _example(_COIL)
-    for kw in ({"dc_pin_fc": 0.0}, {"dc_pin_fc": "fast"}, {"dc_island_leak": -1.0}):
+    for kw, why in (({"dc_pin_fc": 0.0}, "corner frequency"), ({"dc_pin_fc": "fast"}, "corner"),
+                    ({"dc_island_leak": -1.0}, "leak"), ({"dc_island_leak": "x"}, "leak"),
+                    ({"dc_pin_fc": 10 ** 400}, "corner"),
+                    ({"dc_island_leak": 10 ** 400}, "leak")):
         res = _convert(net, max_order=13, **kw)
-        assert res.ok and not res.dc_pin.ok and "DC pin skipped" in res.dc_pin.message
+        assert res.ok and not res.dc_pin.ok, res.dc_pin.message
+        assert res.dc_pin.message.startswith(f"DC pin skipped: the {why}"), res.dc_pin.message
         assert "dcp" not in res.ngspice
+
+
+def test_the_message_names_a_corner_or_leak_away_from_the_default():
+    """The window has no control for them, so a loaded design that sets them is named in the
+    pin's message, whatever the pin did, in ASCII like every core message."""
+    net = _example(_COIL)
+    for kw in ({}, {"dc_pin_fc": 160, "dc_island_leak": 0}):        # the defaults, also as ints
+        assert "Non-default" not in _convert(net, max_order=13, **kw).dc_pin.message
+    res = _convert(net, max_order=13, dc_pin_fc=1e3, dc_island_leak=1e-6)
+    assert res.dc_pin.ok and res.dc_pin.message in res.messages
+    assert res.dc_pin.message.endswith(". Non-default settings: corner 1 kHz (default 160 Hz), "
+                                       "island leak 1e-06 S (default 0 S)")
+    nan = _convert(net, max_order=13, dc_pin_fc=float("nan")).dc_pin
+    assert not nan.ok and nan.message.endswith("Non-default settings: corner nan Hz "
+                                               "(default 160 Hz)")
+    hand = _convert(net, max_order=13, dc_island_leak="x").dc_pin
+    assert hand.message.endswith("Non-default settings: island leak 'x' (default 0 S)")
+    huge = _convert(net, max_order=13, dc_pin_fc=10 ** 400).dc_pin  # an int beyond any float
+    assert huge.message.endswith("Non-default settings: corner inf Hz (default 160 Hz)")
+    wpd = _convert(_with_dc_point(_example("wpd_ihp-sg13g2.s3p")), max_order=6,
+                   dc_pin_fc=1e3).dc_pin
+    assert "singular" in wpd.message and wpd.message.endswith("corner 1 kHz (default 160 Hz)")
+    assert all(p.message.isascii() for p in (res.dc_pin, nan, hand, wpd))
 
 
 def test_the_pin_matches_its_closed_form():
@@ -263,6 +292,9 @@ def test_cli_writes_the_pinned_netlist(tmp_path, capsys):
     out = tmp_path / "coil.spice"
     assert cli.main(["convert", src, "--order", "13", "-o", str(out), "--no-progress"]) == 0
     assert "Gdcp_y1_2" in out.read_text() and "dc_pinned" in capsys.readouterr().out
+    assert cli.main(["convert", src, "--order", "13", "--dc-pin-fc", "1kHz", "-o", str(out),
+                     "--no-progress"]) == 0
+    assert "Non-default settings: corner 1 kHz (default 160 Hz)" in capsys.readouterr().out
     assert cli.main(["convert", src, "--order", "13", "--no-dc-pin", "-o", str(out),
                      "--quiet"]) == 0
     assert "dcp" not in out.read_text()

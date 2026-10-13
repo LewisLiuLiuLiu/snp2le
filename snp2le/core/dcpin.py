@@ -35,7 +35,7 @@ from .ir import Element
 # (1 - DC_SIGMA) / (2 z0), 1e-8 S at 50 ohm.
 DC_SIGMA = 1.0 - 1e-6
 # Gain of the copy sources, the read gains scaled up by its inverse.  VACASK, which does not
-# scale its matrix, solved the pinned coil 1e-7 off at 1 THz with a gain of 1 (a 3-port ORCA
+# scale its matrix, solved the pinned coil 4e-7 off at 1 THz with a gain of 1 (a 3-port ORCA
 # coil 2e-7), and all seven cases tried to 1e-15 with gains from 1e-4 to 1e-9.  Ngspice is
 # exact either way.
 _COPY = 1e-6
@@ -141,6 +141,15 @@ def _sigma(s):
     return np.linalg.svd(s, compute_uv=False)[..., 0]
 
 
+def _as_float(value):
+    """A loaded design can carry anything here. A value that is no number becomes NaN, which
+    its own check then names."""
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an int beyond any float
+        return float("nan")
+
+
 def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
     """Pin the realisation `ir` of the fit `vf` to the 0 Hz S-matrix `s0`, in place.
 
@@ -151,10 +160,7 @@ def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
     from .units import format_eng
     from .universal import model_sparams
     skip = "DC pin skipped: "
-    try:                                    # a loaded design can carry anything here
-        fc, leak = float(fc), float(leak)
-    except (TypeError, ValueError):
-        fc = leak = float("nan")
+    fc, leak = _as_float(fc), _as_float(leak)
     if not (np.isfinite(fc) and fc > 0):
         return (DCPinHealth(False, skip + "the corner frequency must be finite and above 0 Hz"),
                 model_s)
