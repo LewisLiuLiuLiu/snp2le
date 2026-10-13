@@ -994,6 +994,22 @@ def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys, monkeypatch):
     assert "subcircuit is named" not in capsys.readouterr().err
 
 
+def test_cli_quiet_names_each_file_before_its_tables(tmp_path, capsys, monkeypatch):
+    """--quiet drops the status line that names the file, so with several inputs each set of
+    tables gets the file's name.  One input prints as before."""
+    from snp2le import cli
+    monkeypatch.chdir(tmp_path)
+    srcs = [_example_path("ind_500pH_ihp-sg13cmos5l.s2p"),
+            _example_path("ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p")]
+    assert cli.main(["convert", *srcs, "--mode", "structure", "--values", "--tolerances",
+                     "--quiet"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    heads = [i for i, ln in enumerate(out) if ln.strip() == "element values:"]
+    assert [out[i - 1] for i in heads] == [f"{s}:" for s in srcs]
+    assert cli.main(["convert", srcs[0], "--mode", "structure", "--values", "--quiet"]) == 0
+    assert capsys.readouterr().out.splitlines()[0].strip() == "element values:"
+
+
 def test_cli_input_and_output_mistakes_get_one_clear_message(tmp_path, capsys):
     from snp2le import cli
     rc = cli.main(["convert", str(tmp_path / "nothing*.s2p"), "--quiet"])

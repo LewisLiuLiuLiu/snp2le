@@ -709,9 +709,13 @@ def cmd_convert(args):
         if not args.quiet:
             for m in res.messages:
                 print(f"       note: {m}")
+        show_tolerances = args.tolerances and struct is not None and not struct.wideband
+        if (args.quiet and len(paths) > 1
+                and ((args.values and res.value_rows) or show_tolerances)):
+            print(f"{src}:")                 # --quiet drops the status line that names it
         if args.values:
             _print_values(res)
-        if args.tolerances and struct is not None and not struct.wideband:  # else warned
+        if show_tolerances:                  # else a warning said it is ignored
             _print_tolerances(res)
 
     # optional: run a testbench, then show the data-vs-model-vs-sim plots

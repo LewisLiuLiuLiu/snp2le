@@ -402,7 +402,7 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--show-output` | sim | show the simulator's console and plot windows |
 | `--timeout S` | sim | seconds to wait for a `--simulate` result (default 180) |
 | `--plot [SPARAMS]` | both | display data-vs-model plots, plus the sim overlay after `--simulate` (e.g. `S11,S21`) |
-| `--quiet` | both | suppress the per-file status and `note:` lines (and the progress bar). `[FAIL]` and `[WARN]` lines stay |
+| `--quiet` | both | suppress the per-file status and `note:` lines (and the progress bar). `[FAIL]` and `[WARN]` lines stay, and with several inputs a line naming the file comes before its `--values` and `--tolerances` tables |
 | `--progress` / `--no-progress` | both | force the progress bar on or off (default: on when stderr is a terminal) |
 
 ### Examples
