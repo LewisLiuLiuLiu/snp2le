@@ -43,6 +43,14 @@ def test_units_roundtrip():
     assert format_eng(float("nan")) == "\u2014"
 
 
+def test_format_eng_rounds_before_it_picks_the_prefix():
+    """0.9996 used to print as "1e+03 m", the CLI's --values showed state resistors so."""
+    assert format_eng(0.9996, "H") == "1 H"
+    assert format_eng(999.6, "H") == "1 kH"
+    assert format_eng(-0.0009996, "F") == "-1 mF"
+    assert format_eng(0.9994, "H") == "999 mH"
+
+
 # ---------------------------------------------------------------- universal
 def test_universal_fits_and_renders():
     net = inductor_2port()
