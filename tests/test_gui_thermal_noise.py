@@ -32,12 +32,12 @@ _WPD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
 def test_noise_text_names_what_the_netlist_carries():
     """Pure function, no window."""
-    assert noise_text(Results(ok=True, mode="universal")) == "noiseless (ideal)"
+    assert noise_text(Results(ok=True, mode="universal")) == "noiseless"
     assert noise_text(Results(ok=True, mode="universal",
                               noise=NoiseHealth(True, "added"))) == "thermal ✓"
     assert noise_text(Results(ok=True, mode="universal",
                               noise=NoiseHealth(False, "no"))) == "NOT added"
-    assert noise_text(Results(ok=True, mode="structure")) == "thermal (resistors)"
+    assert noise_text(Results(ok=True, mode="structure")) == "thermal (R)"
     assert noise_text(Results(ok=False, error="boom")) == "—"
 
 
@@ -89,7 +89,7 @@ def test_ticking_it_adds_the_generator(win, top):
     top.thermal_noise.setChecked(False)
     _settle(win)
     assert win._res.noise is None
-    assert win.design.noise_out.value.text() == "noiseless (ideal)"
+    assert win.design.noise_out.value.text() == "noiseless"
     assert "nz_" not in win.design.ngspice_edit.toPlainText()
 
 

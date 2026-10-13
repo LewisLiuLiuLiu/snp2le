@@ -208,9 +208,9 @@ running.</li>
 &sigma;<sub>max</sub> against the ceiling it was judged against (green below the
 ceiling, red above it), the model order (universal), the extraction frequency (structure)
 or the top of the fitted band (wideband inductors),
-and the <i>noise</i> the netlist carries: <i>noiseless (ideal)</i>, <i>thermal</i> (green) when
+and the <i>noise</i> the netlist carries: <i>noiseless</i>, <i>thermal</i> (green) when
 <b>Thermal noise</b> added the generator, <i>NOT added</i> (red) when the model could not
-carry it, or <i>thermal (resistors)</i> for a structure model.
+carry it, or <i>thermal (R)</i> for a structure model, whose resistors carry their own noise.
 Passivity reads <i>passive</i> below 1, <i>below ceiling</i> when a raised ceiling was
 reached, <i>near-passive</i> when enforcement ran and could not reach it, and <i>not
 passive</i> when the model is above its ceiling. Structure models are passive by
