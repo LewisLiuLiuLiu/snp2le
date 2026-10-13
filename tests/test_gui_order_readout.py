@@ -53,3 +53,19 @@ def test_structure_mode_keeps_the_extraction_frequency(app):
     assert view.order_out.label.text() == "ext. frequency"
     assert "poles" not in view.order_out.value.text()
     assert "extracted at" in view.order_out.toolTip()
+
+
+def test_a_dimensionless_value_reads_as_a_plain_number(app):
+    """The balun's coupling k is a number between 0 and 1, so it reads 0.434 as in the
+    CLI, not 434 m."""
+    from snp2le.core import io
+    from snp2le.gui.widgets import OutputField
+    net = io.load_touchstone(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "snp2le", "examples", "balun_ihp-sg13cmos5l.s4p"))
+    res = engine.convert(ConverterState(mode="structure", structure_key="balun"), net)
+    view = DesignView()
+    view.update_results(res)
+    shown = [f.value.text() for f in view.findChildren(OutputField)]
+    plain = [val for lab, val, unit in res.value_rows if unit == ""]
+    assert plain and all(f"{v:.4g}" in shown for v in plain)
+    assert not any(t.endswith(" m") for t in shown)

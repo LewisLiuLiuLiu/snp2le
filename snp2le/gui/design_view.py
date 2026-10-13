@@ -11,6 +11,12 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from snp2le.core.units import format_eng
+
+
+def _value_text(val, unit):
+    """An element value as the CLI prints it: SI prefix with a unit, a plain number for a
+    dimensionless one (k 0.434, not 434 m)."""
+    return format_eng(val, unit) if unit else f"{val:.4g}"
 from .style import JKU_GRAY, STATUS_GREEN, STATUS_AMBER, STATUS_RED
 from .widgets import (OutputField, section_title, MathLabel, passivity_text,
                       sigma_text, noise_text, with_symbols)
@@ -268,13 +274,13 @@ class DesignView(QtWidgets.QWidget):
             grid.setHorizontalSpacing(16); grid.setVerticalSpacing(4 + _ROW_GAP)
             per_col = (len(res.value_rows) + 1) // 2          # top to bottom, then right
             for i, (label, val, unit) in enumerate(res.value_rows):
-                of = OutputField(label, format_eng(val, unit), label_w=76,
+                of = OutputField(label, _value_text(val, unit), label_w=76,
                                  equals=True, field_w=96)
                 grid.addWidget(of, i % per_col, i // per_col)
             self.values_host.addWidget(host, alignment=QtCore.Qt.AlignHCenter)
         elif res.physical and res.value_rows:
             for label, val, unit in res.value_rows:
-                of = OutputField(label, format_eng(val, unit), label_w=52,
+                of = OutputField(label, _value_text(val, unit), label_w=52,
                                  equals=True, field_w=128)
                 self.values_host.addWidget(of, alignment=QtCore.Qt.AlignHCenter)
         else:
