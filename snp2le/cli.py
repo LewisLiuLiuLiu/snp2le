@@ -165,6 +165,12 @@ def _positive(text):
     return v
 
 
+def _simulator_for(sch):
+    """The simulator a testbench is for, from its file name alone as the GUI does, so a folder
+    named vacask_runs/ cannot pick VACASK for an Ngspice testbench."""
+    return "vacask" if "vacask" in os.path.basename(sch).lower() else "ngspice"
+
+
 def _corner(text):
     """argparse type for the DC pin's corner frequency (above 0 Hz)."""
     v = _freq(text)
@@ -389,7 +395,7 @@ def _run_testbench(sch, simulator, show_output, sweep, timeout):
         print("  " + msg, file=sys.stderr)
         _tail_log(log, "VACASK console")
         if simulator != "vacask":
-            print("  Ngspice keeps no log here; run the testbench directly or open it in "
+            print("  Ngspice keeps no log here. Run the testbench directly or open it in "
                   "xschem to see the error", file=sys.stderr)
         return None
 
@@ -472,7 +478,7 @@ def cmd_convert(args):
         print("no input files", file=sys.stderr)
         return 2
     if args.output and len(paths) > 1:
-        print("[WARN] -o is ignored with multiple inputs; each output is named after its "
+        print("[WARN] -o is ignored with multiple inputs, each output is named after its "
               "source", file=sys.stderr)
 
     # the ceiling is what the enforcement aims at, so it means nothing without it
@@ -611,7 +617,7 @@ def cmd_convert(args):
         # a singular DC operating point makes the netlist unsimulable, so always warn
         if res.dc is not None and not res.dc.ok:
             print(f"[WARN] {src}: DC operating point may be singular "
-                  f"(margin {res.dc.margin:.0e}); try a lower --order or --passive",
+                  f"(margin {res.dc.margin:.0e}), try a lower --order or --passive",
                   file=sys.stderr)
         if (pin_given and args.dc_pin is not False and res.mode == "universal"
                 and res.dc_pin is None):
@@ -628,15 +634,15 @@ def cmd_convert(args):
     # optional: run a testbench, then show the data-vs-model-vs-sim plots
     sim = None
     if args.simulate and last_res is None:
-        print("[WARN] no successful conversion; skipping --simulate", file=sys.stderr)
+        print("[WARN] no successful conversion, skipping --simulate", file=sys.stderr)
     elif args.simulate:
         if len(paths) > 1:
-            print("[WARN] --simulate uses the last converted file; the testbench's DUT must "
-                  "match it", file=sys.stderr)
-        simr = args.simulator or ("vacask" if "vacask" in args.simulate.lower() else "ngspice")
+            print("[WARN] --simulate uses the last converted file, and the testbench's DUT "
+                  "must match it", file=sys.stderr)
+        simr = args.simulator or _simulator_for(args.simulate)
         if simr not in formats:
-            print(f"[WARN] simulating with {simr} but only {'/'.join(formats)} was exported; "
-                  f"the testbench may not find its DUT netlist (use --format {simr} or both)",
+            print(f"[WARN] simulating with {simr} but only {'/'.join(formats)} was exported, "
+                  f"so the testbench may not find its DUT netlist (use --format {simr} or both)",
                   file=sys.stderr)
         sweep = None                    # the model is only valid where it was fitted
         if last_res.freq is not None and len(last_res.freq):

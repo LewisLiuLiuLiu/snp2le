@@ -847,6 +847,14 @@ def test_a_constant_term_above_the_ceiling_is_named():
     assert wpd.sigma_max > 1.0 and not d_lines(wpd)
 
 
+def test_cli_picks_the_simulator_from_the_file_name():
+    """As the GUI does: a folder named vacask_runs/ must not pick VACASK for an Ngspice
+    testbench."""
+    from snp2le import cli
+    assert cli._simulator_for("tb/two_port_tb_acsp_vacask.sch") == "vacask"
+    assert cli._simulator_for("vacask_runs/two_port_tb_acsp_ngspice.sch") == "ngspice"
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):

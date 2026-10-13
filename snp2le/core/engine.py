@@ -275,7 +275,7 @@ def _convert_structure(state, net, res, track):
             and (state.f_extract < pos[0] or state.f_extract > pos[-1])):
         where = "the fit range" if res.band_limited else "the data"
         res.messages.append(
-            f"ext. frequency {format_eng(state.f_extract, 'Hz')} outside {where}; "
+            f"ext. frequency {format_eng(state.f_extract, 'Hz')} outside {where}, "
             f"extracted at {format_eng(metrics.get('f_extract'), 'Hz')}")
     _nl.clamp_ir(ir)                          # one clamped model: netlist == overlay == table
     res.ir = ir
