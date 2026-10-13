@@ -20,7 +20,7 @@ import os
 
 import numpy as np
 
-from .state import Results
+from .state import ConverterState, Results
 from .progress import StageTracker
 from .process_state import ProcessSetting
 from . import netlist as _nl
@@ -255,7 +255,36 @@ def _pin_dc(state, net, res, fit, dc_s, z0):
             res.ir.elements, res.ir.notes, res.model_s = pinned
     if res.dc_pin.ok:                               # the overlay and RMS describe the netlist
         res.rms_error = _rms(res.model_s, net.s)
+    res.dc_pin.message += _pin_settings(state)
     res.messages.append(res.dc_pin.message)
+
+
+def _pin_settings(state):
+    """The pin's corner and island leak where they differ from the defaults, as a sentence for
+    its message.  Only the CLI and a loaded design set them, the window has no control for them."""
+    named = []
+    for name, value, default, unit in (
+            ("corner", state.dc_pin_fc, ConverterState.dc_pin_fc, "Hz"),
+            ("island leak", state.dc_island_leak, ConverterState.dc_island_leak, "S")):
+        try:                                        # a loaded design can carry anything here
+            value = float(value)
+        except (TypeError, ValueError):
+            pass
+        if value != default:
+            named.append(f"{name} {_setting_text(value, unit)} "
+                         f"(default {_setting_text(default, unit)})")
+    return ". Non-default settings: " + ", ".join(named) if named else ""
+
+
+def _setting_text(value, unit):
+    """ASCII like every core message: a corner as '1 kHz', anything else as '1e-06 S', since
+    format_eng writes micro as µ and a non-finite value as an em dash."""
+    from .units import format_eng
+    if not isinstance(value, float):
+        return repr(value)
+    if unit == "Hz" and np.isfinite(value) and abs(value) >= 1e-3:
+        return format_eng(value, unit)
+    return f"{value:g} {unit}"
 
 
 def _convert_structure(state, net, res, track):

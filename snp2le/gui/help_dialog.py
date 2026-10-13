@@ -215,7 +215,8 @@ running.</li>
 conversion setting and the path of the loaded file as JSON, and load it back, which also
 reloads that file. A design written by hand or by a script can carry the CLI's DC pin
 corner and island leak, which the window has no control for and keeps until
-<b>Reset</b>. A design whose file cannot be read is applied to the file already loaded,
+<b>Reset</b>. The message line names them while they differ from the defaults.
+A design whose file cannot be read is applied to the file already loaded,
 and a dialog names the missing one.</li>
 <li><b>Result</b>: fit/extraction quality. RMS error against the data, passivity,
 &sigma;<sub>max</sub> against the ceiling it was judged against (green below the
