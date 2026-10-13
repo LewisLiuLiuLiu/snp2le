@@ -855,7 +855,8 @@ def build_parser():
                    help="print per-element tolerances at f_ext (extracted structures)")
     c.add_argument("--quiet", action="store_true",
                    help="suppress the per-file status and note: lines and the progress bar. "
-                        "[FAIL] and [WARN] lines stay")
+                        "[FAIL] and [WARN] lines stay, and with several inputs each file's "
+                        "tables keep its name")
     c.add_argument("--progress", action="store_true", default=None,
                    help="show a progress bar while converting (default: only on a terminal)")
     c.add_argument("--no-progress", dest="progress", action="store_false",
