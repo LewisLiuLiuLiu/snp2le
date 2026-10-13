@@ -10,6 +10,9 @@ from dataclasses import dataclass, field, asdict, fields
 import json
 
 _TRUE, _FALSE = {"true", "yes", "on", "1"}, {"false", "no", "off", "0"}
+# Numbers the window has no control for, so a design file is their only way in there.  true
+# would read as 1, so a value that is no number refuses the design, as a bad tick box does.
+_NUMBER_FIELDS = ("dc_pin_fc", "dc_island_leak")
 
 
 def _as_bool(name, value):
@@ -79,6 +82,11 @@ class ConverterState:
                 if v is None:                 # null: the default, like a missing key
                     continue
                 v = _as_bool(k, v)
+            elif k in _NUMBER_FIELDS:
+                if v is None:
+                    continue
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise ValueError(f"{k} must be a number, got {v!r}")
             values[k] = v
         return cls(**values)
 

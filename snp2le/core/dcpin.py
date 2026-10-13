@@ -142,7 +142,7 @@ def _sigma(s):
 
 
 def _as_float(value):
-    """A loaded design can carry anything here. A value that is no number becomes NaN, which
+    """A caller can pass anything here. A value that is no number becomes NaN, which
     its own check then names."""
     try:
         return float(value)

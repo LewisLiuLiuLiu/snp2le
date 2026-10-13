@@ -266,7 +266,7 @@ def _pin_settings(state):
     for name, value, default, unit in (
             ("corner", state.dc_pin_fc, ConverterState.dc_pin_fc, "Hz"),
             ("island leak", state.dc_island_leak, ConverterState.dc_island_leak, "S")):
-        try:                                        # a loaded design can carry anything here
+        try:                                        # a caller can pass anything here
             value = float(value)
         except OverflowError:                       # an int beyond any float
             value = float("inf") if value > 0 else float("-inf")
