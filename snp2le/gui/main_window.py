@@ -869,6 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self, "Load conversion settings", "", "JSON (*.json)")
         if not path:
             return
+        loaded_path = self.state.source_path
         try:
             with open(path, encoding="utf-8") as fh:
                 self.state = ConverterState.from_json(fh.read())
@@ -879,8 +880,15 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 self.net = io.load_touchstone(self.state.source_path)
                 self.top.set_ports(self.net.nports)
-            except Exception:                             # noqa: BLE001
-                pass
+            except Exception as exc:                      # noqa: BLE001
+                # keep converting the file on screen, under its own name, so Export and
+                # Save design do not take the missing file's
+                missing, self.state.source_path = self.state.source_path, loaded_path
+                QtWidgets.QMessageBox.warning(
+                    self, "Load design",
+                    f"The design's file could not be read:\n{missing}\n\n{exc}\n\n"
+                    f"Its settings are applied to the file already loaded"
+                    + (f":\n{loaded_path}" if loaded_path else "."))
         self.top.set_values(self.state)        # sync the controls to the loaded design
         self._seed_band(keep=True)             # its band wins, the file fills any gap
         self.recompute()
