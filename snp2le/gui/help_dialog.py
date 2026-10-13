@@ -223,7 +223,8 @@ or the top of the fitted band (wideband inductors),
 and the <i>noise</i> the netlist carries: <i>noiseless</i>, <i>thermal (R) &#10003;</i> in
 green when <b>Thermal noise</b> added the generator, <i>NOT added</i> (red) when the model could not
 carry it, or <i>thermal (R)</i> without colour for a structure model, whose resistors carry
-their own noise.
+their own noise. A structure model without resistors, such as the branch-line coupler
+without <b>Resistive loss</b>, reads <i>noiseless</i>.
 Passivity reads <i>passive &#10003;</i> below 1, <i>below ceiling &#10003;</i> when a raised
 ceiling was reached, <i>near-passive</i> when enforcement ran and could not reach it, and <i>not
 passive</i> when the model is above its ceiling. Structure models are passive by

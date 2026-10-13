@@ -109,7 +109,7 @@ class DesignView(QtWidgets.QWidget):
             "The message line below says why, and Export refuses until it is fixed or\n"
             "'Thermal noise' is unticked.\n"
             "thermal (R) without colour: a structure model, whose resistors are real loss\n"
-            "and always carry their noise.")
+            "and always carry their noise. One without resistors reads noiseless.")
         for i, w in enumerate((self.mode_out, self.band_out, self.rms_out, self.pass_out,
                                self.sigma_out, self.order_out, self.noise_out)):
             if i:

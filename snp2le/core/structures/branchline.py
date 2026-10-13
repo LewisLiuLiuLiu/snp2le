@@ -38,6 +38,11 @@ from ..units import comp_label, port_label
 # square arms: (node a, node b, tag), series 1-2 & 4-3, shunt 1-4 & 2-3
 _ARMS = (("p1", "p2", "se"), ("p4", "p3", "se"),
          ("p1", "p4", "sh"), ("p2", "p3", "sh"))
+# Without arm loss the four arm inductors form a loop, and its current is undetermined at DC:
+# VACASK aborts the operating point (a zero pivot on an inductor branch) and Ngspice falls
+# back to gmin stepping.  One arm gets this noiseless series resistance, which moves S by
+# about 1e-8 and keeps the model lossless.
+_LOOP_R = 1e-6
 
 
 class BranchLineCoupler(Structure):
@@ -47,15 +52,20 @@ class BranchLineCoupler(Structure):
 
     @staticmethod
     def _build_ir(L_se, L_sh, R_se, R_sh, C):
-        """Assemble the coupler IR.  Each arm is a series L (+ series R when lossy)."""
+        """Assemble the coupler IR.  Each arm is a series L (+ series R when lossy), and a
+        lossless one breaks the inductor loop with _LOOP_R in its first arm."""
         ir = CircuitIR(name="branchline", ports=["p1", "p2", "p3", "p4"], physical=True)
         LR = {"se": (L_se, R_se), "sh": (L_sh, R_sh)}
+        lossless = not (R_se > 0 or R_sh > 0)
         for i, (a, b, tag) in enumerate(_ARMS):
             L, R = LR[tag]
             if R > 0:
                 mid = f"n{i}"
                 ir.add(Element("L", f"L{i}", (a, mid), L, label=f"L_{tag}"))
                 ir.add(Element("R", f"R{i}", (mid, b), R, label=f"R_{tag}"))
+            elif lossless and i == 0:
+                ir.add(Element("L", f"L{i}", (a, "n0"), L, label=f"L_{tag}"))
+                ir.add(Element("R", "Rloop", ("n0", b), _LOOP_R, label="R_loop", noisy=False))
             else:
                 ir.add(Element("L", f"L{i}", (a, b), L, label=f"L_{tag}"))
         for i, p in enumerate(("p1", "p2", "p3", "p4"), 1):
@@ -128,7 +138,7 @@ class BranchLineCoupler(Structure):
         import schemdraw as sd
         import schemdraw.elements as elm
         sd.use("matplotlib")
-        has_R = any(e.kind == "R" for e in ir.elements)     # lossy arms
+        has_R = any(e.kind == "R" and e.noisy is not False for e in ir.elements)  # lossy arms
         Lse = comp_label("L_se"); Lsh = comp_label("L_sh"); Cl = comp_label("C")
         Rse = comp_label("R_se"); Rsh = comp_label("R_sh")
         d = sd.Drawing(show=False); d.config(unit=1.6, fontsize=11)

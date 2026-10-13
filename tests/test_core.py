@@ -855,6 +855,49 @@ def test_cli_picks_the_simulator_from_the_file_name():
     assert cli._simulator_for("vacask_runs/two_port_tb_acsp_ngspice.sch") == "ngspice"
 
 
+def test_every_structure_has_a_solvable_dc_operating_point():
+    """VACASK aborts on a singular DC operating point where Ngspice falls back to gmin
+    stepping, so every extracted model must solve at DC on the data it is meant for (an
+    inductor model on the band-pass filter clamps its values and is not).  The lossless
+    branch-line coupler's four arm inductors used to form a loop with an undetermined
+    current."""
+    from snp2le.core import dc
+    pairs = {"ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p": ("inductor-pi",),
+             "ind_500pH_ihp-sg13cmos5l.s2p": ("inductor-pi",),
+             "mim_cap_170fF_ihp-sg13g2.s2p": ("mim-cap",),
+             "mom_cap_74fF_02_ihp-sg13cmos5l.s2p": ("mim-cap",),
+             "tline_100um_ihp-sg13g2.s2p": ("tline-rlgc",),
+             "wpd_ihp-sg13g2.s3p": ("wilkinson", "wilkinson-inphase"),
+             "blc_ihp-sg13g2.s4p": ("branchline",),
+             "balun_ihp-sg13cmos5l.s4p": ("balun", "branchline")}
+    for name, keys in pairs.items():
+        net = _example(name)
+        for key in keys:
+            for iso in (True, False):
+                res = engine.convert(ConverterState(mode="structure", structure_key=key,
+                                                    iso_resistor=iso), net)
+                assert res.ok and dc.dc_check(res.ir).ok, (name, key, iso)
+
+
+def test_the_lossless_branchline_keeps_its_response():
+    """The loop resistor moves S by about 1e-8 and stays out of the noise and the values."""
+    import copy
+    from snp2le.core import mna
+    net = _example("blc_ihp-sg13g2.s4p")
+    res = engine.convert(ConverterState(mode="structure", structure_key="branchline",
+                                        iso_resistor=False), net)
+    loop = next(e for e in res.ir.elements if e.name == "Rloop")
+    assert loop.value == 1e-6 and loop.noisy is False
+    assert "Rloop n0 p2 1e-06 noisy=0" in res.ngspice
+    assert all(lab != "R_loop" for lab, _, _ in res.value_rows)
+    ideal = copy.deepcopy(res.ir)                     # the same model with the loop closed
+    ideal.elements = [e for e in ideal.elements if e.name != "Rloop"]
+    for e in ideal.elements:
+        e.nodes = tuple("p2" if n == "n0" else n for n in e.nodes)
+    f = net.f[::10]
+    assert np.max(np.abs(mna.rlc_sparams(res.ir, f) - mna.rlc_sparams(ideal, f))) < 1e-6
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):

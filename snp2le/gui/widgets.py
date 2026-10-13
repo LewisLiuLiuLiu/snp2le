@@ -188,8 +188,11 @@ def noise_text(res) -> str:
     noisy."""
     if not res.ok:
         return "—"
-    if res.mode == "structure":
-        return "thermal (R)"
+    if res.mode == "structure":                # its resistors are the structure's loss
+        from ..core.netlist import _silenced
+        ir = getattr(res, "ir", None)
+        noisy = ir is None or any(e.kind == "R" and not _silenced(e, ir) for e in ir.elements)
+        return "thermal (R)" if noisy else "noiseless"
     noise = getattr(res, "noise", None)
     if noise is None:
         return "noiseless"
