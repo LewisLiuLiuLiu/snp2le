@@ -141,6 +141,15 @@ def _sigma(s):
     return np.linalg.svd(s, compute_uv=False)[..., 0]
 
 
+def _as_float(value):
+    """A loaded design can carry anything here. A value that is no number becomes NaN, which
+    its own check then names."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
     """Pin the realisation `ir` of the fit `vf` to the 0 Hz S-matrix `s0`, in place.
 
@@ -151,10 +160,7 @@ def add_dc_pin(ir, vf, s0, rz, freq, model_s, rms, fc, leak=0.0):
     from .units import format_eng
     from .universal import model_sparams
     skip = "DC pin skipped: "
-    try:                                    # a loaded design can carry anything here
-        fc, leak = float(fc), float(leak)
-    except (TypeError, ValueError):
-        fc = leak = float("nan")
+    fc, leak = _as_float(fc), _as_float(leak)
     if not (np.isfinite(fc) and fc > 0):
         return (DCPinHealth(False, skip + "the corner frequency must be finite and above 0 Hz"),
                 model_s)

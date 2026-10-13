@@ -212,10 +212,14 @@ def test_the_island_leak_reaches_only_the_floating_mode():
 
 
 def test_a_bad_setting_in_a_loaded_design_skips_the_pin():
+    """The skip names the setting at fault, also for a leak that is no number, which used to
+    be blamed on the corner."""
     net = _example(_COIL)
-    for kw in ({"dc_pin_fc": 0.0}, {"dc_pin_fc": "fast"}, {"dc_island_leak": -1.0}):
+    for kw, why in (({"dc_pin_fc": 0.0}, "corner frequency"), ({"dc_pin_fc": "fast"}, "corner"),
+                    ({"dc_island_leak": -1.0}, "leak"), ({"dc_island_leak": "x"}, "leak")):
         res = _convert(net, max_order=13, **kw)
-        assert res.ok and not res.dc_pin.ok and "DC pin skipped" in res.dc_pin.message
+        assert res.ok and not res.dc_pin.ok, res.dc_pin.message
+        assert res.dc_pin.message.startswith(f"DC pin skipped: the {why}"), res.dc_pin.message
         assert "dcp" not in res.ngspice
 
 
