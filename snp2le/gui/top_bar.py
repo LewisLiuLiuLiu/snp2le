@@ -29,7 +29,8 @@ _DISABLED_GREY = QtGui.QColor(DISABLED_FG)     # greyed-out dropdown items
 # Gap between neighbouring controls, the divider included.  The controls row is the widest
 # row in the window, so this decides whether the window fits a 1920 px screen.  Measured in
 # the IIC-OSIC-TOOLS container under WSLg (Sans Serif 9): 14 px needs 1929 px, too wide for a
-# maximized window there (Wayland aborts the app), 12 px needs 1899 px.
+# maximized window there (Wayland aborts the app), 12 px needs 1903 px, and the window adds
+# 6 px, so 1914 px is the limit.
 _GAP = 12
 
 
@@ -232,7 +233,7 @@ class TopBar(QtWidgets.QWidget):
             "(--shunt-accuracy).")
 
         self.order = QtWidgets.QSpinBox(); self.order.setRange(2, 40); self.order.setValue(6)
-        self.order.setFixedWidth(66)          # two digits plus the arrows, no more
+        self.order.setFixedWidth(70)          # two digits and the arrows, 66 clipped "13"
         self.order.setToolTip(
             "Largest model order the vector fit may grow to, counted as\n"
             "n_real + 2 x n_complex, the number of internal states per port in the\n"
@@ -348,7 +349,7 @@ class TopBar(QtWidgets.QWidget):
         to_lbl = QtWidgets.QLabel("to"); to_lbl.setProperty("class", "fieldLabel")
         bl.addWidget(self.f_min); bl.addWidget(to_lbl); bl.addWidget(self.f_max)
         # The DC pin tick box sits on the caption line, in width the two fields already take,
-        # since the bar has no width to spare (1899 px on a 1920 px screen in the container),
+        # since the bar has no width to spare (1903 px on a 1920 px screen in the container),
         # and at the caption's own height, so the fields stay in line with the strip.
         self.dc_pin = QtWidgets.QCheckBox("DC pin")
         self.dc_pin.setObjectName("captionCheck")
