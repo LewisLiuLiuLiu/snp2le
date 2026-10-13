@@ -100,13 +100,14 @@ class DesignView(QtWidgets.QWidget):
             "What the netlist carries as noise.\n"
             "noiseless: a universal model without 'Thermal noise'. Its resistors\n"
             "place poles, not loss, so they are emitted with noisy=0.\n"
-            "thermal: 'Thermal noise' added the passive's own noise, kT(I - S S^H) at the\n"
-            "ports, from a generator computed from the fit.\n"
+            "thermal (R) ✓ in green: 'Thermal noise' added the passive's own noise,\n"
+            "kT(I - S S^H) at the ports, from a generator of noisy resistors computed from\n"
+            "the fit.\n"
             "NOT added: the model is not strictly passive, so no such generator exists.\n"
             "The message line below says why, and Export refuses until it is fixed or\n"
             "'Thermal noise' is unticked.\n"
-            "thermal (R): a structure model, whose resistors are real loss and always\n"
-            "carry their noise.")
+            "thermal (R) without colour: a structure model, whose resistors are real loss\n"
+            "and always carry their noise.")
         for i, w in enumerate((self.mode_out, self.band_out, self.rms_out, self.pass_out,
                                self.sigma_out, self.order_out, self.noise_out)):
             if i:

@@ -193,7 +193,7 @@ def noise_text(res) -> str:
     noise = getattr(res, "noise", None)
     if noise is None:
         return "noiseless"
-    return "thermal ✓" if noise.ok else "NOT added"
+    return "thermal (R) ✓" if noise.ok else "NOT added"
 
 
 _SYMBOLS = {"sigma_max": "σ_max"}

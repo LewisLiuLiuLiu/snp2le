@@ -34,7 +34,7 @@ def test_noise_text_names_what_the_netlist_carries():
     """Pure function, no window."""
     assert noise_text(Results(ok=True, mode="universal")) == "noiseless"
     assert noise_text(Results(ok=True, mode="universal",
-                              noise=NoiseHealth(True, "added"))) == "thermal ✓"
+                              noise=NoiseHealth(True, "added"))) == "thermal (R) ✓"
     assert noise_text(Results(ok=True, mode="universal",
                               noise=NoiseHealth(False, "no"))) == "NOT added"
     assert noise_text(Results(ok=True, mode="structure")) == "thermal (R)"
@@ -83,7 +83,7 @@ def test_ticking_it_adds_the_generator(win, top):
     _settle(win)
     assert win.state.thermal_noise is True
     assert win._res.noise is not None and win._res.noise.ok
-    assert win.design.noise_out.value.text() == "thermal ✓"
+    assert win.design.noise_out.value.text() == "thermal (R) ✓"
     assert "Rnz_e1" in win.design.ngspice_edit.toPlainText()
     assert "Rnz_e1" in win.design.vacask_edit.toPlainText()
     top.thermal_noise.setChecked(False)
