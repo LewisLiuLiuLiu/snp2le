@@ -898,6 +898,64 @@ def test_the_lossless_branchline_keeps_its_response():
     assert np.max(np.abs(mna.rlc_sparams(res.ir, f) - mna.rlc_sparams(ideal, f))) < 1e-6
 
 
+def _example_path(name):
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "snp2le", "examples", name)
+
+
+def test_cli_refuses_numbers_out_of_range():
+    import pytest
+    from snp2le import cli
+    p = cli.build_parser()
+    for bad in (["--order", "1"], ["--order", "x"], ["--fmin", "-5GHz"], ["--fmax", "-1"],
+                ["--timeout", "0"], ["--timeout", "-1"]):
+        with pytest.raises(SystemExit):
+            p.parse_args(["convert", "x.s2p", *bad])
+    a = p.parse_args(["convert", "x.s2p"])
+    assert (a.order, a.stages, a.timeout) == (6, None, 180.0)
+
+
+def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
+    from snp2le import cli
+    out = str(tmp_path / "a.spice")
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--fext", "7GHz",
+                     "--stages", "4", "-o", out, "--quiet"]) == 0
+    assert "--fext, --stages ignored in universal mode" in capsys.readouterr().err
+    assert cli.main(["convert", _example_path("wpd_ihp-sg13g2.s3p"), "--mode", "structure",
+                     "--structure", "wilkinson", "--stages", "3", "--no-iso-r", "-o", out,
+                     "--quiet"]) == 0
+    assert ("--stages, --no-iso-r ignored, wilkinson has no such option"
+            in capsys.readouterr().err)
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--basic", "-o", out,
+                     "--quiet"]) == 0
+    assert ("--basic ignored, it applies to the wideband inductor structures"
+            in capsys.readouterr().err)
+
+
+def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys):
+    from snp2le import cli
+    out = tmp_path / "my-model.spice"
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(out),
+                     "--quiet"]) == 0
+    assert ".SUBCKT my_model " in out.read_text()
+    assert "the subcircuit is named my_model" in capsys.readouterr().err
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o",
+                     str(tmp_path / "plain.spice"), "--quiet"]) == 0
+    assert "subcircuit is named" not in capsys.readouterr().err
+
+
+def test_cli_input_and_output_mistakes_get_one_clear_message(tmp_path, capsys):
+    from snp2le import cli
+    rc = cli.main(["convert", str(tmp_path / "nothing*.s2p"), "--quiet"])
+    err = capsys.readouterr().err
+    assert rc == 1 and err.count("no file matches") == 1 and "Errno" not in err
+    folder = tmp_path / "outdir"
+    folder.mkdir()
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(folder),
+                     "--quiet"]) == 1
+    assert "that is a folder, -o takes a file name" in capsys.readouterr().err
+
+
 if __name__ == "__main__":
     # allow running without pytest
     for name, fn in sorted(globals().items()):

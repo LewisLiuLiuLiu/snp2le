@@ -374,7 +374,7 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `inputs` | both | one or more `.sNp` files or globs |
 | `--mode universal\|structure` | both | conversion philosophy (default `universal`) |
 | `--structure KEY` | structure | structure key (see `list-structures`, default `inductor-pi`) |
-| `--order N` | universal | maximum model order, counted as `n_real + 2 x n_complex` (default 6) |
+| `--order N` | universal | maximum model order, counted as `n_real + 2 x n_complex`, 2 or more (default 6) |
 | `--passive` / `--no-passive` | universal | enforce passivity (default on) |
 | `--passivity-ceiling SIGMA` | universal | sigma_max the enforcement works towards, `1.0` to `1.2`, needs `--passive` (default `1.0`) |
 | `--thermal-noise` / `--no-thermal-noise` | universal | add the passive's thermal noise, kT(I - S S<sup>H</sup>) at the ports, or emit the noiseless model (default noiseless). A model that is not strictly passive cannot carry it: nothing is written and the exit code is non-zero |
@@ -393,9 +393,9 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--shunt-accuracy [K]` | structure | wideband inductors: measure substrate errors against at least K x the series branch, for measured or FDTD data (K = 0.01 without a value) |
 | `--ct-port {1,2,3}` | structure | `inductor-ct`: center tap port (default: detected from the data) |
 | `--format ngspice\|vacask\|both` | both | output dialect(s), default `ngspice`. VACASK writes `.inc` |
-| `-o, --output PATH` | both | output path (single input), names the `.SUBCKT` |
+| `-o, --output PATH` | both | output path (single input), names the `.SUBCKT`. A file stem that is not a valid name in both dialects is changed for the `.SUBCKT` (`my-model` to `my_model`), with a warning |
 | `--values` | both | print the element values (extracted, or the synthesised network's) |
-| `--tolerances` | structure | print per-element tolerances at `f_ext` |
+| `--tolerances` | structure | print per-element tolerances at `f_ext` (the inductor, MIM capacitor, line and balun models) |
 | `--simulate SCH` | sim | run an Xschem testbench after converting |
 | `--simulator ngspice\|vacask` | sim | simulator for `--simulate` (default: auto from `.sch` name) |
 | `--show-output` | sim | show the simulator's console and plot windows |
