@@ -878,6 +878,9 @@ def test_every_structure_has_a_solvable_dc_operating_point():
              "wpd_ihp-sg13g2.s3p": ("wilkinson", "wilkinson-inphase"),
              "blc_ihp-sg13g2.s4p": ("branchline",),
              "balun_ihp-sg13cmos5l.s4p": ("balun", "branchline")}
+    # the wideband fits are checked in test_inductor_wideband.py, on its module fixtures
+    assert ({k for keys in pairs.values() for k in keys}
+            == {k for k, _, _ in structure_items() if not get_structure(k).wideband})
     for name, keys in pairs.items():
         net = _example(name)
         for key in keys:
