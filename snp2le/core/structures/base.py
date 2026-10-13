@@ -20,8 +20,8 @@ class Structure(ABC):
     display_name = ""
     n_ports = 2          # required port count
     # True for a model fitted over the whole band instead of read off at f_ext.  Its
-    # extract() also takes `basic` and `progress` keywords and returns its notes in
-    # metrics["messages"].  The GUI hides f_ext for it and shows 'Basic model' instead.
+    # extract() also takes `progress` and inductor_wideband.wideband_options() as
+    # keywords.  The GUI hides f_ext for it and shows 'Basic model' instead.
     wideband = False
 
     @abstractmethod
@@ -29,8 +29,8 @@ class Structure(ABC):
         """Return (CircuitIR, metrics, rows) with the lumped values read off near
         `f_extract` [Hz].  `n_segments` sets the ladder stage count for structures
         that use one (the RLGC line).  `iso_r` toggles the isolation resistor for the
-        Wilkinson dividers.  Other structures ignore them.  Raises ValueError if not
-        applicable."""
+        Wilkinson dividers.  Other structures ignore them.  Notes for the message line go
+        in metrics["messages"].  Raises ValueError if not applicable."""
 
     @staticmethod
     def nearest_index(f, f_extract):

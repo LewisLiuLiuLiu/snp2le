@@ -252,8 +252,12 @@ wideband inductors are fitted over the band): the per-element agreement at the e
 frequency, |data&nbsp;&minus;&nbsp;model|&nbsp;/&nbsp;model in&nbsp;%. Directly-read
 reciprocal terms (a series L, R) read about 0&nbsp;%, because the model reproduces them
 exactly. Terms the model can only approximate (e.g. a shunt C forced symmetric across two
-slightly asymmetric ports) carry the residual. The &#9675; marker on each model curve in
-the Plot view sits at this frequency.</li>
+slightly asymmetric ports) carry the residual. The line model builds its elements from the
+magnitude of the data's R', L', G' and C', and the message line names any the data puts
+below zero. A loss term R' or G' a hair under zero, as an EM solver gives, still reads
+about 0&nbsp;%. A negative L' or C' reads 200&nbsp;%, since the model's reactance then has
+the wrong sign. The &#9675; marker on each
+model curve in the Plot view sits at this frequency.</li>
 <li><b>Schematic</b>: the drawn topology for a physical model. The universal macromodel
 shows a note instead.</li>
 <li><b>Netlist</b>: the generated text for both dialects, in two tabs. <b>Export

@@ -297,7 +297,6 @@ def _convert_structure(state, net, res, track):
         ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
                                            state.iso_resistor, progress=track.sub("extract"),
                                            **wideband_options(state))
-        res.messages.extend(metrics.pop("messages", ()))
     else:
         ir, metrics, rows = struct.extract(net, state.f_extract, state.n_segments,
                                            state.iso_resistor)
@@ -308,7 +307,8 @@ def _convert_structure(state, net, res, track):
         res.messages.append(
             f"ext. frequency {format_eng(state.f_extract, 'Hz')} outside {where}, "
             f"extracted at {format_eng(metrics.get('f_extract'), 'Hz')}")
-    _nl.clamp_ir(ir)                          # one clamped model: netlist == overlay == table
+    res.messages.extend(metrics.pop("messages", ()))       # the extractor's own notes
+    _nl.clamp_ir(ir)                         # one clamped model: netlist == overlay == table
     res.ir = ir
     res.physical = True
     res.metrics = metrics

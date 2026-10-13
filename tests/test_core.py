@@ -207,6 +207,63 @@ def test_value_tolerance_at_fext():
     # universal macromodel exposes no per-element tolerance
     ures = engine.convert(ConverterState(mode="universal", max_order=6), inductor_2port())
     assert not ures.value_drift
+    # the line's G' at 10 GHz sits a hair below zero.  R_sh reads it as the extractor does,
+    # |G'| per cell, where a clip at 1e-30 had made it 1e30 ohm and the tolerance 1e24 %
+    from snp2le.core.structures.tline import _rlgc_decomp
+    line = _example("tline_100um_ihp-sg13g2.s2p")
+    tres = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                         f_extract=10e9), line)
+    k = int(np.argmin(np.abs(line.f - 10e9)))
+    assert _rlgc_decomp(line.s, line.f, 50.0)["Gp"][k] < 0
+    assert tres.value_drift["R_sh"] < 1e-3
+    assert any(m.startswith("the data's G' at") and m.endswith("so R_sh is built from |G'|")
+               for m in tres.messages), tres.messages
+    # R' below zero at 300 GHz read 200 %, and Z_c, which the lossless sqrt(L'/C') stood
+    # for, 28.5 % at 875 MHz.  Every term of the line now reads ~0 % at f_ext.
+    for fx in (0.875e9, 300e9):
+        r = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                          f_extract=fx), line)
+        assert all(v < 1e-3 for v in r.value_drift.values()), (fx, r.value_drift)
+    assert any("R' at 300 GHz is below zero" in m and m.endswith("so R_s is built from |R'|")
+               for m in r.messages)
+    # a negative L' means the model's reactance has the wrong sign: a capacitor fed to the
+    # line model misses its data by |dS| 0.7 at 10 GHz, and L_s says so with 200 %
+    mom = _example("mom_cap_74fF_02_ihp-sg13cmos5l.s2p")
+    cap = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                        f_extract=10e9), mom)
+    assert abs(cap.value_drift["L_s"] - 200.0) < 5.0
+    assert any("L' at" in m and "L_s is built from |L'|" in m for m in cap.messages)
+
+
+def test_the_line_note_names_the_terms_the_data_puts_below_zero():
+    """A line with gain (G' < 0, R' > 0): arccosh(A) and sqrt(B/C) at one sample picked the
+    other branch and named R', L' and C' instead of G'.  The note reads the signs off the
+    same unwrapped decomposition as the plots."""
+    import skrf
+    f = np.linspace(1e9, 20e9, 39)
+    w = 2 * np.pi * f
+    z = 1e-3 + 1j * w * 60e-12                      # R' and L' of the whole line
+    y = -1e-5 + 1j * w * 25e-15                     # G' below zero, C'
+    zc = np.sqrt(z / y)
+    gl = z / zc
+    abcd = np.array([[np.cosh(gl), zc * np.sinh(gl)], [np.sinh(gl) / zc, np.cosh(gl)]])
+    s = skrf.network.a2s(np.moveaxis(abcd, -1, 0), z0=50.0)
+    net = skrf.Network(frequency=skrf.Frequency.from_f(f, unit="Hz"), s=s, z0=50.0)
+    res = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                        f_extract=10e9), net)
+    notes = [m for m in res.messages if m.startswith("the data's")]
+    assert len(notes) == 1 and notes[0].startswith("the data's G' at"), notes
+    assert notes[0].endswith("so R_sh is built from |G'|")
+
+
+def test_the_line_shunt_r_follows_the_resistor_limit():
+    """The netlist clamps a resistor at 1e12 ohm, so R_sh does too, from 1e-12 S down, and
+    an absurdly small conductance raises no overflow."""
+    from snp2le.core.structures.tline import _shunt_r
+    assert _shunt_r(1e-13) == 1e12 and _shunt_r(-1e-13) == 1e12 and _shunt_r(0.0) == 1e12
+    assert _shunt_r(2e-12) == 5e11 and _shunt_r(-0.5) == 2.0
+    with np.errstate(all="raise"):
+        assert _shunt_r(5e-324) == 1e12
 
 
 def test_mna_coupled_inductors_match_mutual_impedance():
@@ -983,6 +1040,22 @@ def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys, monkeypatch):
     assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--quiet"]) == 0
     assert ".SUBCKT bpf_ihp_sg13g2 " in (tmp_path / "bpf_ihp-sg13g2.spice").read_text()
     assert "subcircuit is named" not in capsys.readouterr().err
+
+
+def test_cli_quiet_names_each_file_before_its_tables(tmp_path, capsys, monkeypatch):
+    """--quiet drops the status line that names the file, so with several inputs each set of
+    tables gets the file's name.  One input prints as before."""
+    from snp2le import cli
+    monkeypatch.chdir(tmp_path)
+    srcs = [_example_path("ind_500pH_ihp-sg13cmos5l.s2p"),
+            _example_path("ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p")]
+    assert cli.main(["convert", *srcs, "--mode", "structure", "--values", "--tolerances",
+                     "--quiet"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    heads = [i for i, ln in enumerate(out) if ln.strip() == "element values:"]
+    assert [out[i - 1] for i in heads] == [f"{s}:" for s in srcs]
+    assert cli.main(["convert", srcs[0], "--mode", "structure", "--values", "--quiet"]) == 0
+    assert capsys.readouterr().out.splitlines()[0].strip() == "element values:"
 
 
 def test_cli_input_and_output_mistakes_get_one_clear_message(tmp_path, capsys):
