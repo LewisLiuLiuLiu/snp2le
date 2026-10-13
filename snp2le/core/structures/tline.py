@@ -21,6 +21,14 @@ from ..units import comp_label, port_label
 N_SEGMENTS = 2          # default number of L-cells in the ladder
 
 
+def _shunt_r(g):
+    """R_sh from a shunt conductance per cell, the rule extract() and value_drift() share:
+    |G'|, since the data can put G' a hair below zero, and 1e12 ohm where it is negligible."""
+    g = np.abs(np.asarray(g, dtype=float))
+    with np.errstate(divide="ignore"):
+        return np.where(g > 1e-15, 1.0 / g, 1e12)
+
+
 def _rlgc_decomp(s, f, z0):
     """Distributed line parameters over frequency from S-parameters: series R'
     and L', shunt G' and C'.  Because the physical length is not supplied these
@@ -66,7 +74,7 @@ class TransmissionLine(Structure):
         L_seg = float(abs(Ztot.imag / wk)) / n
         G_seg = float(abs(Ytot.real)) / n
         C_seg = float(abs(Ytot.imag / wk)) / n
-        Rsh = 1.0 / G_seg if G_seg > 1e-15 else 1e12
+        Rsh = float(_shunt_r(G_seg))
 
         ir = CircuitIR(name="tline_rlgc", ports=["p1", "p2"], physical=True)
         ir.comments.append(f"RLGC line, {n} L-cells, extracted at {f[k]/1e9:.2f} GHz")
@@ -98,8 +106,9 @@ class TransmissionLine(Structure):
         D = _rlgc_decomp(net.s, net.f, z0)
         vals = {lab: v for lab, v, _ in value_rows}
         n = max(1, int(round(vals.get("N_seg", 1))))     # per-cell = whole-line / N
+        # clipping G' at 1e-30 instead read a G' below zero as 1e30 ohm, a tolerance of 1e24 %
+        Rsh = _shunt_r(D["Gp"] / n)
         with np.errstate(divide="ignore", invalid="ignore"):
-            Rsh = 1.0 / np.maximum(D["Gp"] / n, 1e-30)
             Zc = np.sqrt(D["Lp"] / D["Cp"])
         curves = {"Z_c": Zc, "R_s": D["Rp"] / n, "L_s": D["Lp"] / n,
                   "C_sh": D["Cp"] / n, "R_sh": Rsh}

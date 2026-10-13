@@ -207,6 +207,15 @@ def test_value_tolerance_at_fext():
     # universal macromodel exposes no per-element tolerance
     ures = engine.convert(ConverterState(mode="universal", max_order=6), inductor_2port())
     assert not ures.value_drift
+    # the line's G' at 10 GHz sits a hair below zero.  R_sh reads it as the extractor does,
+    # |G'| per cell, where a clip at 1e-30 had made it 1e30 ohm and the tolerance 1e24 %
+    from snp2le.core.structures.tline import _rlgc_decomp
+    line = _example("tline_100um_ihp-sg13g2.s2p")
+    tres = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                         f_extract=10e9), line)
+    k = int(np.argmin(np.abs(line.f - 10e9)))
+    assert _rlgc_decomp(line.s, line.f, 50.0)["Gp"][k] < 0
+    assert tres.value_drift["R_sh"] < 1e-3
 
 
 def test_mna_coupled_inductors_match_mutual_impedance():
