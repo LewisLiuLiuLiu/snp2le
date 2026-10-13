@@ -253,7 +253,8 @@ the Plot view sits at this frequency.</li>
 <li><b>Schematic</b>: the drawn topology for a physical model. The universal macromodel
 shows a note instead.</li>
 <li><b>Netlist</b>: the generated text for both dialects, in two tabs. <b>Export
-Ngspice</b> and <b>Export VACASK</b> in the top bar write it to a file. <b>Ngspice</b>
+Ngspice</b> and <b>Export VACASK</b> in the top bar write it to a file, and its header
+names the snp2le version that wrote it. <b>Ngspice</b>
 (Berkeley SPICE3, <tt>.spice</tt>) and <b>VACASK</b> (Spectre syntax, <tt>.inc</tt>).
 Transformer coupling is emitted as a builtin <tt>mutual</tt> instance. Device models and
 OSDI loads come from your testbench, not the exported subcircuit. A universal macromodel's
