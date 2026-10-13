@@ -164,7 +164,9 @@ class MainWindow(QtWidgets.QMainWindow):
         net = getattr(self, "net", None)
         if net is None or not len(net.f):
             return
-        lo, hi = float(net.f[0]), float(net.f[-1])
+        # the fit starts at the first sample above 0 Hz, and a 0 in the field reads as open
+        pos = net.f[net.f > 0]
+        lo, hi = float(pos[0] if len(pos) else net.f[0]), float(net.f[-1])
         if keep:
             v = self.top.values()
             lo = v["f_min"] if v["f_min"] is not None else lo

@@ -185,3 +185,24 @@ def test_the_dc_pin_box_reaches_the_state(win, top):
     assert top.dc_pin.isChecked() and win.state.dc_pin is True
     top.set_values(ConverterState(dc_pin=False))
     assert not top.dc_pin.isChecked()
+
+
+def test_a_file_with_a_0_hz_sample_shows_where_the_fit_starts():
+    """The fit drops the 0 Hz sample, so the band starts at the first sample above it, and
+    that is what the field shows.  A 0 there read as open and left the field empty."""
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "snp2le", "examples", "ind_d20_w7_sp3_nw1_r10_ihp-sg13g2.s2p")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    w = MainWindow(path)
+    try:
+        _settle(w)
+        f0, f1 = w.net.f[0], w.net.f[1]
+        shown, want = w.top.f_min.text(), w.top._ghz_text(f1)
+        f_min, limited, pin = w.state.f_min, w._res.band_limited, w._res.dc_pin
+    finally:
+        w.close()
+        app.processEvents()
+    assert f0 == 0 and shown == want != ""
+    assert f_min == f1 and not limited
+    assert pin is not None and pin.ok
