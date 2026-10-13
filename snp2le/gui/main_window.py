@@ -889,6 +889,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"The design's file could not be read:\n{missing}\n\n{exc}\n\n"
                     f"Its settings are applied to the file already loaded"
                     + (f":\n{loaded_path}" if loaded_path else "."))
+        else:                                  # a design without a file applies to this one
+            self.state.source_path = loaded_path
         self.top.set_values(self.state)        # sync the controls to the loaded design
         self._seed_band(keep=True)             # its band wins, the file fills any gap
         self.recompute()

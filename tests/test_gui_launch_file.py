@@ -151,3 +151,19 @@ def test_a_design_with_a_missing_file_keeps_the_loaded_one(app, warnings, tmp_pa
         assert w.state.source_path == EXAMPLE and w.net.nports == 4
         assert w.state.max_order == 8
         assert len(warnings) == 1 and missing in warnings[0][1]
+
+
+def test_a_design_without_a_file_keeps_the_loaded_one(app, warnings, tmp_path, monkeypatch):
+    """A design written by hand or by a script often names no file. Its settings apply to
+    the file on screen, which Export and Save design keep naming."""
+    design = tmp_path / "design.json"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(design), ""))
+    for text in ('{"mode": "universal", "max_order": 8}',
+                 '{"mode": "universal", "max_order": 8, "source_path": ""}'):
+        design.write_text(text)
+        with _window(app, None) as w:
+            w.on_load_design()
+            _settle(w)
+            assert w.state.source_path == EXAMPLE and w.net.nports == 4, text
+            assert w.state.max_order == 8 and not warnings
