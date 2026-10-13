@@ -146,7 +146,7 @@ def _as_float(value):
     its own check then names."""
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an int beyond any float
         return float("nan")
 
 

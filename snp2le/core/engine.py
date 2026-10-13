@@ -268,6 +268,8 @@ def _pin_settings(state):
             ("island leak", state.dc_island_leak, ConverterState.dc_island_leak, "S")):
         try:                                        # a loaded design can carry anything here
             value = float(value)
+        except OverflowError:                       # an int beyond any float
+            value = float("inf") if value > 0 else float("-inf")
         except (TypeError, ValueError):
             pass
         if value != default:

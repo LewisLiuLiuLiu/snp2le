@@ -216,7 +216,9 @@ def test_a_bad_setting_in_a_loaded_design_skips_the_pin():
     be blamed on the corner."""
     net = _example(_COIL)
     for kw, why in (({"dc_pin_fc": 0.0}, "corner frequency"), ({"dc_pin_fc": "fast"}, "corner"),
-                    ({"dc_island_leak": -1.0}, "leak"), ({"dc_island_leak": "x"}, "leak")):
+                    ({"dc_island_leak": -1.0}, "leak"), ({"dc_island_leak": "x"}, "leak"),
+                    ({"dc_pin_fc": 10 ** 400}, "corner"),
+                    ({"dc_island_leak": 10 ** 400}, "leak")):
         res = _convert(net, max_order=13, **kw)
         assert res.ok and not res.dc_pin.ok, res.dc_pin.message
         assert res.dc_pin.message.startswith(f"DC pin skipped: the {why}"), res.dc_pin.message
@@ -238,6 +240,8 @@ def test_the_message_names_a_corner_or_leak_away_from_the_default():
                                                "(default 160 Hz)")
     hand = _convert(net, max_order=13, dc_island_leak="x").dc_pin
     assert hand.message.endswith("Non-default settings: island leak 'x' (default 0 S)")
+    huge = _convert(net, max_order=13, dc_pin_fc=10 ** 400).dc_pin  # an int beyond any float
+    assert huge.message.endswith("Non-default settings: corner inf Hz (default 160 Hz)")
     wpd = _convert(_with_dc_point(_example("wpd_ihp-sg13g2.s3p")), max_order=6,
                    dc_pin_fc=1e3).dc_pin
     assert "singular" in wpd.message and wpd.message.endswith("corner 1 kHz (default 160 Hz)")
