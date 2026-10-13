@@ -10,7 +10,7 @@ point `engine.convert(state, net)`. The module map is the README's
 [Directory Structure](../README.md#directory-structure).
 
 The GUI uses only `QtCore`, `QtGui`, `QtWidgets` and `QtSvg`, so the declared
-dependency is `PySide6-Essentials`, not the full `PySide6` metapackage — the
+dependency is `PySide6-Essentials`, not the full `PySide6` metapackage. The
 latter drags in PySide6-Addons (QtWebEngine, Multimedia, Charts, ...), roughly
 400 MB that nothing here imports. This matters for container images such as
 IIC-OSIC-TOOLS. Keep it that way: a bare `from PySide6.QtCharts import ...`
@@ -24,7 +24,7 @@ install satisfies the requirement too, since the metapackage depends on
 
 The flow is always **load, `engine.convert(state, net)`, `Results`, views**:
 
-1. `io.load_touchstone` reads the `.sNp` (scikit-rf); `engine.convert` then drops
+1. `io.load_touchstone` reads the `.sNp` (scikit-rf), and `engine.convert` then drops
    any 0 Hz sample through `io.without_dc` and restricts the data to the requested
    fit band through `io.restrict_band` (`state.f_min` / `state.f_max`, both optional).
    In universal mode the file's 0 Hz sample goes on in two ways: as `dc_net`, the band with it, for a refit in passivity enforcement, and as the target of the DC pin (`dcpin.py`), appended after the fit. Everything downstream, the RMS error, the plots and a testbench run's sweep,
@@ -43,12 +43,12 @@ The flow is always **load, `engine.convert(state, net)`, `Results`, views**:
 `core/progress.py` holds the two pieces around that contract: `StageTracker`
 maps a stage's own 0..1 onto its weighted slice of the whole run (the weights
 live in `engine._PLAN_UNIVERSAL` / `_PLAN_STRUCTURE`), and `ProgressReporter` is
-a thread-safe sink that also keeps elapsed time and an ETA. Core stays Qt-free:
+a thread-safe sink that also keeps the elapsed time (no time-remaining estimate, see `progress.py`). Core stays Qt-free:
 the reporter is plain `threading`.
 
 `engine.convert` runs the whole conversion on one BLAS thread (`engine._one_blas_thread`, threadpoolctl 3.5 or newer, the first release that finds the scipy-openblas libraries of numpy 2 and scipy wheels). The matrices are small, and with the default 14 threads on a hybrid laptop CPU a 7-port core at order 24 with thermal noise converted in 905 s against 2.2 s on one thread. threadpoolctl changes the loaded libraries at run time and restores them afterwards, where environment variables would also reach every simulator snp2le starts. An explicit `OPENBLAS_NUM_THREADS` or `MKL_NUM_THREADS` turns the limit off, and so does a missing threadpoolctl. Conversions that overlap in threads share the limit through `process_state.ProcessSetting`: the first one in sets it and the last one out restores the count the process had. A save-and-restore per call left a program that ran 16 conversions in 8 threads on one BLAS thread for good, since the second conversion saved the first one's limit as the original. One thread gives the same result as an `OPENBLAS_NUM_THREADS=1` run of 0.1.11 in every record of the option-space dump. Against 0.1.11 at 14 threads the universal netlists of the bundled examples were unchanged at the 10 digits 0.1.12 printed, while a few wideband inductor fits settle elsewhere along their weakly determined values, the same kind of move another numpy or scipy makes.
 
-Two parts of the pipeline report from inside, which is what makes the fraction
+Three parts of the pipeline report from inside, which is what makes the fraction
 track real work rather than count steps:
 
 * `mna.rlc_sparams` reports per frequency (one MNA solve each), which dominates
@@ -107,7 +107,7 @@ The GUI shows its own page in place of f_ext (`TopBar.wide_page`), the Result pa
 
 ## Developing
 
-Install with the dev extras (pytest, build, twine) on top of the runtime
+Install with the dev extras (pytest, build, twine, reuse) on top of the runtime
 dependencies, then run the tests:
 
 ```bash
@@ -142,7 +142,7 @@ pytest
   by 1/t, runs scikit-rf's standard perturbation, and scales back. At t = 1.0 both
   scalings are the identity, which is what keeps the strict path bit-for-bit what it
   was. A ceiling the residue perturbation cannot reach (an unbounded violation band,
-  from a non-passive constant term) leaves the accurate fit in place instead. When perturbation fails, `_enforce_passivity_path()` tries a lower-order refit and, for a file with a 0 Hz point (`dc_net`), a refit at the same order that includes it, enforced the same way. Each counts only if it clears the ceiling and still fits the data (`_USABLE_RMS`), and the closer one wins. scikit-rf meets the 0 Hz point through the constant term, so the refit lands on other poles and residues and often clears the ceiling where the free fit's D ran past 1. It does not bound D in general (with a DC point prepended, the WPD at order 6 still fits D at 5.06), it is one more candidate. Like the lower-order refit, a passing one replaces the accurate near-passive fit under the `_USABLE_RMS` rule, at an error 12 times larger in the median over 130 ORCA runs and up to 600 times on the bundled examples (the 500 pH coil with a DC point, order 6: 7.0e-5 to 3.7e-2). With `prefer_strict` (the engine sets it for thermal noise) candidates rank strictly passive first, then by RMS: at ceiling 1.05 the refit can land just above sigma 1 and beat a strictly passive lower-order refit, which cost two ORCA coils their noise generator until the rule. On the bundled examples with a DC point prepended, the balun and the 500 pH coil at order 6 go from near-passive to passive, and `tline_100um` at order 13 does too, with scikit-rf 1.12 and 2.1.0 alike. Without `dc_net` the branches and messages are those of 0.1.13. With it a failed perturbation costs one more fit and its enforcement, about twice the conversion time on the 3-port ORCA coils at order 40 (2.0 s to 3.8 s), reported on its own share of the progress bar, and a refit that does not settle reports that only when it is the one kept. `dc_net` exists when the fitted band starts at the file's first sample above 0 Hz, and not for a 0 Hz row that is not finite. Its 0 Hz point is clipped to sigma `dcpin.DC_SIGMA` = 1 - 1e-6, the pin's own clip: a coil's open common mode is a sigma of exactly 1 there, the refit meets it, and a model at sigma 1 has no spectral factor, so 5 of 20 ORCA coils at order 40 lost their thermal noise to the refit until the clip. Without `max_order` the refit runs at the fit's own model order. scikit-rf's `passivity_enforce` writes only the residues (1.12 and 2.1.0 alike), so the constant term D, the model's value at infinite frequency, is out of its reach. `universal.constant_term_sigma()` measures D, and a final model whose D is above its ceiling gets a message that names D and the knob that is left, another Max order. `Results.passivity_path` says which branch produced the model (`off`, `not needed`, `perturbed`, `reduced order`, `dc refit` or `near-passive`, empty for a structure model), so a caller need not read it out of the messages. `universal._enforce_passivity()` keeps its three return values for callers outside snp2le, `_enforce_passivity_path()` adds the path. 1.0 is
+  from a non-passive constant term) leaves the accurate fit in place instead. When perturbation fails, `_enforce_passivity_path()` tries a lower-order refit and, for a file with a 0 Hz point (`dc_net`), a refit at the same order that includes it, enforced the same way. Each counts only if it clears the ceiling and still fits the data (`_USABLE_RMS`), and the closer one wins. scikit-rf meets the 0 Hz point through the constant term, so the refit lands on other poles and residues and often clears the ceiling where the free fit's D ran past 1. It does not bound D in general (with a DC point prepended, the WPD at order 6 still fits D at 5.06), it is one more candidate. Like the lower-order refit, a passing one replaces the accurate near-passive fit under the `_USABLE_RMS` rule, at an error 12 times larger in the median over 130 ORCA runs and 520 times on the bundled 500 pH coil with a DC point at order 6 (7.0e-5 to 3.7e-2). With `prefer_strict` (the engine sets it for thermal noise) candidates rank strictly passive first, then by RMS: at ceiling 1.05 the refit can land just above sigma 1 and beat a strictly passive lower-order refit, which cost two ORCA coils their noise generator until the rule. On the bundled examples with a DC point prepended, the balun and the 500 pH coil at order 6 go from near-passive to passive, and `tline_100um` at order 13 does too, with scikit-rf 1.12 and 2.1.0 alike. Without `dc_net` the branches and messages are those of 0.1.13. With it a failed perturbation costs one more fit and its enforcement, about twice the conversion time on the 3-port ORCA coils at order 40 (2.0 s to 3.8 s), reported on its own share of the progress bar, and a refit that does not settle reports that only when it is the one kept. `dc_net` exists when the fitted band starts at the file's first sample above 0 Hz, and not for a 0 Hz row that is not finite. Its 0 Hz point is clipped to sigma `dcpin.DC_SIGMA` = 1 - 1e-6, the pin's own clip: a coil's open common mode is a sigma of exactly 1 there, the refit meets it, and a model at sigma 1 has no spectral factor, so 5 of 20 ORCA coils at order 40 lost their thermal noise to the refit until the clip. Without `max_order` the refit runs at the fit's own model order. scikit-rf's `passivity_enforce` writes only the residues (1.12 and 2.1.0 alike), so the constant term D, the model's value at infinite frequency, is out of its reach. `universal.constant_term_sigma()` measures D, and a final model whose D is above its ceiling gets a message that names D and the knob that is left, another Max order. `Results.passivity_path` says which branch produced the model (`off`, `not needed`, `perturbed`, `reduced order`, `dc refit` or `near-passive`, empty for a structure model), so a caller need not read it out of the messages. `universal._enforce_passivity()` keeps its three return values for callers outside snp2le, `_enforce_passivity_path()` adds the path. 1.0 is
   the floor because a lossless reciprocal network sits at exactly 1. An out-of-range
   number is clamped to the edge it overshot and a non-number falls back to the default
   (`universal.clamp_passivity_ceiling()`), so the GUI field answers "what is the limit"
@@ -151,8 +151,8 @@ pytest
   disagree about it.
 * `ConverterState.max_order` is a model order, `n_real + 2 x n_complex`, and it reaches
   scikit-rf as `auto_fit(model_order_max=...)`. `Results.model_order` is that same count
-  measured on the fitted poles, and it is the number of internal states in the netlist,
-  since a conjugate pair costs `x_re` and `x_im`. `Results.n_poles` counts pole entries,
+  measured on the fitted poles, and it is the number of internal states per port in the
+  netlist (an N-port has N times that), since a conjugate pair costs `x_re` and `x_im`. `Results.n_poles` counts pole entries,
   where a conjugate pair is one, so it is the smaller of the two. The GUI and the CLI
   report the order with the pole count in brackets, because reporting only the pole count
   under the label `order` reads as the cap being exceeded. Below scikit-rf 1.12 `model_order_max` was only the exit

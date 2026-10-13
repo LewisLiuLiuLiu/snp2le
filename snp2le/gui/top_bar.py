@@ -117,7 +117,7 @@ class TopBar(QtWidgets.QWidget):
         lay = QtWidgets.QHBoxLayout(bar); lay.setContentsMargins(12, 0, 12, 0)
         logo = QtWidgets.QLabel(); logo.setPixmap(logo_pixmap(26))
         logo.setFixedWidth(32); logo.setAlignment(QtCore.Qt.AlignVCenter)
-        title = QtWidgets.QLabel("S-Parameter To Lumped Element Netlist Converter")
+        title = QtWidgets.QLabel("S-Parameter to Lumped-Element Netlist Converter")
         title.setObjectName("title")
         ver = QtWidgets.QLabel(f"v{__version__}"); ver.setObjectName("version")
         lay.addWidget(logo); lay.addWidget(title); lay.addWidget(ver); lay.addStretch(1)
@@ -235,8 +235,8 @@ class TopBar(QtWidgets.QWidget):
         self.order.setFixedWidth(66)          # two digits plus the arrows, no more
         self.order.setToolTip(
             "Largest model order the vector fit may grow to, counted as\n"
-            "n_real + 2 x n_complex, which is also the number of internal states in\n"
-            "the netlist. The Result panel reports the order the fit settled on and,\n"
+            "n_real + 2 x n_complex, the number of internal states per port in the\n"
+            "netlist. The Result panel reports the order the fit settled on and,\n"
             "in brackets, its pole count, where a conjugate pair counts once.\n"
             "Raise it for a closer fit and a longer netlist.")
 
@@ -246,7 +246,7 @@ class TopBar(QtWidgets.QWidget):
         self.passive.setChecked(True)
         self.passive.setToolTip(
             "Perturb the fit until its worst singular value is at or below the\n"
-            "Passivity ceiling, so a transient run cannot draw energy out of the model.\n"
+            "Passivity ceiling. At 1.00 a transient run cannot draw energy out of it.\n"
             "It costs fit accuracy. Untick to export the raw fit untouched, whatever it\n"
             "measures.")
 
@@ -277,7 +277,8 @@ class TopBar(QtWidgets.QWidget):
             "Add the passive's own thermal noise, kT(I - S S^H) at the ports, as a\n"
             "generator computed from the fit and appended to the netlist. The fitted\n"
             "network and its S-parameters stay exactly as they are.\n"
-            "It needs a strictly passive model, so keep 'Enforce passivity' at 1.00.\n"
+            "It needs a strictly passive model, so keep 'Enforce passivity' ticked\n"
+            "and the Passivity ceiling at 1.00.\n"
             "Untick for the noiseless (ideal) model, whose resistors carry noisy=0.")
 
         # structure-specific options live in their own containers so each can be shown
@@ -424,7 +425,9 @@ class TopBar(QtWidgets.QWidget):
         self.reset = QtWidgets.QPushButton("  Reset")
         self.reset.setIcon(_reset_icon()); self.reset.setIconSize(QtCore.QSize(16, 16))
         self.reset.setFixedHeight(30)
-        self.reset.setToolTip("Reset the conversion settings to their defaults.")
+        self.reset.setToolTip("Return to the freshly opened window: default settings, the "
+                              "launch file (or the bundled example),\nno testbench and no "
+                              "simulation overlay.")
 
         lay.addLayout(self._labeled("", self.load))
         lay.addSpacing(6)

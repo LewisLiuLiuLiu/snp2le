@@ -37,7 +37,7 @@ class MainWindow(QtWidgets.QMainWindow):
         loaded in place of the bundled example so a tool such as setupEM can open the GUI
         on the EM result it just wrote.  None opens the example, exactly as before."""
         super().__init__()
-        self.setWindowTitle("S-Parameter To Lumped Element Netlist Converter")
+        self.setWindowTitle("S-Parameter to Lumped-Element Netlist Converter")
         from .logo import logo_icon
         self.setWindowIcon(logo_icon())
         # Preferred size, but never larger than the screen: on a small laptop a fixed
@@ -780,7 +780,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"The simulation of {os.path.basename(self._sch_path)} FAILED: it "
                 f"produced no result in\n{self._sim_output_dir()}\n\n"
                 "The simulator most likely reported an error or the analysis was "
-                "aborted - check its console / log for the cause.\n\n"
+                "aborted. Check its console or log for the cause.\n\n"
                 "If you believe it actually succeeded, use 'Import simulation' to load "
                 "the result file manually."
                 + (f"\n\n--- simulator output ---\n{log[-1500:]}" if log else ""))
