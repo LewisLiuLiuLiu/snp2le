@@ -453,8 +453,10 @@ def test_the_cli_says_what_a_wideband_structure_ignores(tmp_path, capsys):
     assert cli.main(["convert", os.path.join(EXAMPLES, IND), "--mode", "structure",
                      "--structure", "inductor-wideband", "--basic", "--fext", "5GHz",
                      "--tolerances", "-o", out]) == 0
+    got = capsys.readouterr()
     assert ("--fext, --tolerances ignored, the wideband inductors are fitted over the band"
-            in capsys.readouterr().err)
+            in got.err)
+    assert "tolerances" not in got.out                    # the warning says it all
     assert cli.main(["convert", os.path.join(EXAMPLES, IND), "--structure",
                      "inductor-wideband", "--basic", "-o", out]) == 0
     assert "--basic ignored, it needs --mode structure" in capsys.readouterr().err

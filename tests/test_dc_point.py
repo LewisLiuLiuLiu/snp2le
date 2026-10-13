@@ -211,9 +211,10 @@ def test_the_island_leak_reaches_only_the_floating_mode():
         assert abs(_r_dc(s) / want - 1.0) < 1e-5
 
 
-def test_a_bad_setting_in_a_loaded_design_skips_the_pin():
+def test_a_bad_setting_skips_the_pin():
     """The skip names the setting at fault, also for a leak that is no number, which used to
-    be blamed on the corner."""
+    be blamed on the corner.  A design file is checked when it loads, a ConverterState built
+    in code is not."""
     net = _example(_COIL)
     for kw, why in (({"dc_pin_fc": 0.0}, "corner frequency"), ({"dc_pin_fc": "fast"}, "corner"),
                     ({"dc_island_leak": -1.0}, "leak"), ({"dc_island_leak": "x"}, "leak"),
@@ -269,6 +270,23 @@ def test_the_pin_options_survive_a_design_round_trip():
     # a design saved before the pin existed opens with it on, at its defaults
     old = ConverterState.from_json('{"mode": "universal"}')
     assert (old.dc_pin, old.dc_pin_fc, old.dc_island_leak) == (True, 160.0, 0.0)
+
+
+def test_a_design_file_holds_its_pin_values_to_numbers():
+    """null means the default, as in a tick-box field.  true would read as 1 (a 1 Hz corner, a
+    1 S leak), so anything that is no number refuses the design.  A number out of range loads
+    and skips the pin with a note at conversion."""
+    import pytest
+    st = ConverterState.from_json('{"dc_pin_fc": null, "dc_island_leak": null}')
+    assert (st.dc_pin_fc, st.dc_island_leak) == (160.0, 0.0)
+    for field in ("dc_pin_fc", "dc_island_leak"):
+        for bad in ("true", "false", '"fast"', "[1]", "{}"):
+            with pytest.raises(ValueError, match=f"{field} must be a number"):
+                ConverterState.from_json(f'{{"{field}": {bad}}}')
+    with pytest.raises(ValueError, match="got true$"):        # as written in the file
+        ConverterState.from_json('{"dc_pin_fc": true}')
+    st = ConverterState.from_json('{"dc_pin_fc": 0, "dc_island_leak": 1e-6}')
+    assert (st.dc_pin_fc, st.dc_island_leak) == (0, 1e-6)
 
 
 def test_cli_dc_pin_flags(capsys):

@@ -500,10 +500,13 @@ def _show_plots(res, sim, sparams):
 
 
 def cmd_convert(args):
+    # None means not given, so a --structure that universal mode ignores can be named.  The
+    # default stays out of args, so a caller can run the same Namespace twice.
+    key = "inductor-pi" if args.structure is None else args.structure
     if args.mode == "structure":
         valid = {k for k, _, _ in structure_items()}
-        if args.structure not in valid:
-            print(f"unknown structure '{args.structure}'. Valid keys: "
+        if key not in valid:
+            print(f"unknown structure '{key}'. Valid keys: "
                   f"{', '.join(sorted(valid))}", file=sys.stderr)
             return 2
 
@@ -536,8 +539,8 @@ def cmd_convert(args):
     p_ceiling = (universal.PASSIVITY_CEILING_DEFAULT if args.passivity_ceiling is None
                 else args.passivity_ceiling)
     given = _wideband_options_given(args)
-    struct = get_structure(args.structure) if args.mode == "structure" else None
-    named_wideband = getattr(STRUCTURES.get(args.structure), "wideband", False)
+    struct = get_structure(key) if args.mode == "structure" else None
+    named_wideband = getattr(STRUCTURES.get(key), "wideband", False)
     if given and not (struct is not None and struct.wideband):
         one = len(given) == 1
         why = (f"{'it needs' if one else 'these need'} --mode structure" if named_wideband
@@ -564,7 +567,8 @@ def cmd_convert(args):
             print(f"[WARN] {', '.join(unused)} ignored, the wideband inductors are fitted "
                   f"over the band and have no extraction frequency", file=sys.stderr)
     if args.mode != "structure":
-        unused = [name for name, on in (("--fext", args.fext is not None),
+        unused = [name for name, on in (("--structure", args.structure is not None),
+                                        ("--fext", args.fext is not None),
                                         ("--stages", args.stages is not None),
                                         ("--no-iso-r", not args.iso_r),
                                         ("--tolerances", args.tolerances)) if on]
@@ -574,11 +578,11 @@ def cmd_convert(args):
                   f"models", file=sys.stderr)
     elif struct is not None:
         unused = [name for name, on in (
-            ("--stages", args.stages is not None and args.structure != "tline-rlgc"),
-            ("--no-iso-r", not args.iso_r and args.structure not in ("wilkinson-inphase",
-                                                                     "branchline"))) if on]
+            ("--stages", args.stages is not None and key != "tline-rlgc"),
+            ("--no-iso-r", not args.iso_r and key not in ("wilkinson-inphase", "branchline"))
+        ) if on]
         if unused:
-            print(f"[WARN] {', '.join(unused)} ignored, {args.structure} has no such option",
+            print(f"[WARN] {', '.join(unused)} ignored, {key} has no such option",
                   file=sys.stderr)
     if args.thermal_noise and args.mode == "structure":
         print("[WARN] --thermal-noise is ignored in structure mode, whose resistors are the "
@@ -609,7 +613,7 @@ def cmd_convert(args):
             rc = 1
             continue
         state = ConverterState(
-            mode=args.mode, structure_key=args.structure,
+            mode=args.mode, structure_key=key,
             max_order=args.order, enforce_passivity=args.passive,
             passivity_ceiling=p_ceiling, thermal_noise=args.thermal_noise,
             dc_pin=args.dc_pin is not False,
@@ -707,7 +711,7 @@ def cmd_convert(args):
                 print(f"       note: {m}")
         if args.values:
             _print_values(res)
-        if args.tolerances:
+        if args.tolerances and struct is not None and not struct.wideband:  # else warned
             _print_tolerances(res)
 
     # optional: run a testbench, then show the data-vs-model-vs-sim plots
@@ -759,7 +763,7 @@ def build_parser():
     c.add_argument("inputs", nargs="+", help=".sNp file(s) or glob(s)")
     # mode and model
     c.add_argument("--mode", choices=["universal", "structure"], default="universal")
-    c.add_argument("--structure", default="inductor-pi",
+    c.add_argument("--structure", default=None,
                    help="structure key when --mode structure (see list-structures, default "
                         "inductor-pi)")
     # universal-mode options
@@ -843,7 +847,8 @@ def build_parser():
                    help="output dialect(s), default ngspice. VACASK writes .inc")
     c.add_argument("-o", "--output", default=None, help="output path (single input)")
     c.add_argument("--values", action="store_true", help="print the extracted element values")
-    c.add_argument("--tolerances", action="store_true", help="print per-element tolerances")
+    c.add_argument("--tolerances", action="store_true",
+                   help="print per-element tolerances at f_ext (extracted structures)")
     c.add_argument("--quiet", action="store_true",
                    help="suppress the per-file status and note: lines and the progress bar. "
                         "[FAIL] and [WARN] lines stay")

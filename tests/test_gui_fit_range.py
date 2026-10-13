@@ -244,3 +244,19 @@ def test_a_design_with_its_own_dc_pin_settings_names_them_until_reset(tmp_path, 
         app.processEvents()
     assert named in loaded and named in changed
     assert "DC pinned" in reset and "Non-default" not in reset
+
+
+def test_a_design_whose_pin_value_is_no_number_is_refused(win, tmp_path, monkeypatch):
+    """true would read as a 1 Hz corner, so the Load failed dialog names the field and the
+    window keeps the state it had."""
+    design = tmp_path / "design.json"
+    design.write_text('{"mode": "universal", "max_order": 9, "dc_pin_fc": true}')
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(design), ""))
+    warned = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *a, **k: warned.append(a[2]))
+    before = win.state.to_json()
+    win.on_load_design()
+    assert warned and "dc_pin_fc must be a number" in warned[0]
+    assert win.state.to_json() == before
