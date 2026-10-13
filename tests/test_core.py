@@ -934,6 +934,19 @@ def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
     assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--fext", "7GHz",
                      "--stages", "4", "-o", out, "--quiet"]) == 0
     assert "--fext, --stages ignored in universal mode" in capsys.readouterr().err
+    # a structure the mode ignores is named too, and an ignored --tolerances prints no table
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--structure", "balun",
+                     "--tolerances", "-o", out, "--quiet"]) == 0
+    got = capsys.readouterr()
+    assert "--structure, --tolerances ignored in universal mode" in got.err
+    assert "tolerances" not in got.out
+    assert cli.build_parser().parse_args(["convert", "x.s2p"]).structure is None
+    # an extracted structure still prints its table, and structure mode still means
+    # inductor-pi without --structure
+    assert cli.main(["convert", _example_path("ind_500pH_ihp-sg13cmos5l.s2p"), "--mode",
+                     "structure", "--tolerances", "-o", out, "--quiet"]) == 0
+    assert "tolerances (|data-model|/model at f_ext):" in capsys.readouterr().out
+    assert "* inductor model, extracted at" in open(out).read()
     assert cli.main(["convert", _example_path("wpd_ihp-sg13g2.s3p"), "--mode", "structure",
                      "--structure", "wilkinson", "--stages", "3", "--no-iso-r", "-o", out,
                      "--quiet"]) == 0

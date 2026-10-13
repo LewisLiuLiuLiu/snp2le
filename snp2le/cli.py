@@ -500,6 +500,10 @@ def _show_plots(res, sim, sparams):
 
 
 def cmd_convert(args):
+    # None means not given, so a --structure that universal mode ignores can be named
+    structure_given = args.structure is not None
+    if not structure_given:
+        args.structure = "inductor-pi"
     if args.mode == "structure":
         valid = {k for k, _, _ in structure_items()}
         if args.structure not in valid:
@@ -564,7 +568,8 @@ def cmd_convert(args):
             print(f"[WARN] {', '.join(unused)} ignored, the wideband inductors are fitted "
                   f"over the band and have no extraction frequency", file=sys.stderr)
     if args.mode != "structure":
-        unused = [name for name, on in (("--fext", args.fext is not None),
+        unused = [name for name, on in (("--structure", structure_given),
+                                        ("--fext", args.fext is not None),
                                         ("--stages", args.stages is not None),
                                         ("--no-iso-r", not args.iso_r),
                                         ("--tolerances", args.tolerances)) if on]
@@ -707,7 +712,7 @@ def cmd_convert(args):
                 print(f"       note: {m}")
         if args.values:
             _print_values(res)
-        if args.tolerances:
+        if args.tolerances and struct is not None and not struct.wideband:  # else warned
             _print_tolerances(res)
 
     # optional: run a testbench, then show the data-vs-model-vs-sim plots
@@ -759,7 +764,7 @@ def build_parser():
     c.add_argument("inputs", nargs="+", help=".sNp file(s) or glob(s)")
     # mode and model
     c.add_argument("--mode", choices=["universal", "structure"], default="universal")
-    c.add_argument("--structure", default="inductor-pi",
+    c.add_argument("--structure", default=None,
                    help="structure key when --mode structure (see list-structures, default "
                         "inductor-pi)")
     # universal-mode options
@@ -843,7 +848,8 @@ def build_parser():
                    help="output dialect(s), default ngspice. VACASK writes .inc")
     c.add_argument("-o", "--output", default=None, help="output path (single input)")
     c.add_argument("--values", action="store_true", help="print the extracted element values")
-    c.add_argument("--tolerances", action="store_true", help="print per-element tolerances")
+    c.add_argument("--tolerances", action="store_true",
+                   help="print per-element tolerances at f_ext (extracted structures)")
     c.add_argument("--quiet", action="store_true",
                    help="suppress the per-file status and note: lines and the progress bar. "
                         "[FAIL] and [WARN] lines stay")
