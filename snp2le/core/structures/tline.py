@@ -35,19 +35,21 @@ def _shunt_r(g):
 
 
 def _sign_note(terms, f):
-    """A note naming the data's R', L', G' or C' at `f` that are below zero, whose magnitude
-    the model takes, or None."""
+    """A note naming the data's R', L', G' or C' at `f` that are below zero, which the netlist
+    takes the magnitude of, or None.  ASCII like every core message, so no micro prefix."""
     neg = [(name, elem, unit, v) for (name, elem, unit), v in zip(_TERMS, terms) if v < 0]
     if not neg:
         return None
-    names = [n for n, _, _, _ in neg]
-    elems = [e for _, e, _, _ in neg]
+    at = format_eng(f, "Hz") if f >= 1e-3 else f"{f:g} Hz"
+    join = lambda xs: xs[0] if len(xs) == 1 else f"{', '.join(xs[:-1])} and {xs[-1]}"
     if len(neg) == 1:
-        return (f"The data's {names[0]} at {format_eng(f, 'Hz')} is below zero "
-                f"({neg[0][3]:.2g} {neg[0][2]}), so {elems[0]} uses its magnitude")
-    return (f"The data's {', '.join(names[:-1])} and {names[-1]} at {format_eng(f, 'Hz')} are "
-            f"below zero ({', '.join(f'{n} {v:.2g} {u}' for n, _, u, v in neg)}), so "
-            f"{', '.join(elems[:-1])} and {elems[-1]} use their magnitudes")
+        values = f"{neg[0][3]:.2g} {neg[0][2]}"
+    else:
+        values = ", ".join(f"{n} {v:.2g} {u}" for n, _, u, v in neg)
+    return (f"the data's {join([n for n, _, _, _ in neg])} at {at} "
+            f"{'is' if len(neg) == 1 else 'are'} below zero ({values}), so "
+            f"{join([e for _, e, _, _ in neg])} {'is' if len(neg) == 1 else 'are'} built from "
+            f"{join([f'|{n}|' for n, _, _, _ in neg])}")
 
 
 def _rlgc_decomp(s, f, z0):
@@ -113,8 +115,11 @@ class TransmissionLine(Structure):
 
         metrics = {"segments": n, "f_extract": float(f[k]),
                    "Zc": float(abs(Zc))}
-        note = _sign_note((Ztot.real, Ztot.imag / wk, Ytot.real, Ytot.imag / wk), f[k])
-        if note:                                            # the netlist takes magnitudes
+        # signs from the unwrapped decomposition the plots use: arccosh(A) and sqrt(B/C)
+        # at one sample can pick the other branch and flip a term the netlist takes |.| of
+        D = _rlgc_decomp(net.s, f, float(np.real(net.z0.flatten()[0])))
+        note = _sign_note([D[t][k] for t in ("Rp", "Lp", "Gp", "Cp")], f[k])
+        if note:
             metrics["messages"] = [note]
         rows = [("N_seg", float(n), ""),
                 ("Z_c", float(abs(Zc)), "Ω"),
@@ -130,10 +135,11 @@ class TransmissionLine(Structure):
         D = _rlgc_decomp(net.s, net.f, z0)
         vals = {lab: v for lab, v, _ in value_rows}
         n = max(1, int(round(vals.get("N_seg", 1))))     # per-cell = whole-line / N
-        # magnitudes as in extract(), which names a term the data puts below zero in a note
-        # (signed curves read 200 % there), and the lossy Z_c the value is
+        # the loss terms in magnitude, as extract() takes them, since an EM solver puts R' or
+        # G' a hair below zero.  L' and C' stay signed: one below zero means the model's
+        # reactance has the wrong sign, which reads 200 %.  Z_c is the lossy value it is.
         curves = {"Z_c": np.abs(D["Zc"]), "R_s": np.abs(D["Rp"]) / n,
-                  "L_s": np.abs(D["Lp"]) / n, "C_sh": np.abs(D["Cp"]) / n,
+                  "L_s": D["Lp"] / n, "C_sh": D["Cp"] / n,
                   "R_sh": _shunt_r(D["Gp"] / n)}
         return {lab: self.fext_tolerance_pct(c, vals[lab], net.f, f_extract)
                 for lab, c in curves.items() if lab in vals}

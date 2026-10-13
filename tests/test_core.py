@@ -216,7 +216,7 @@ def test_value_tolerance_at_fext():
     k = int(np.argmin(np.abs(line.f - 10e9)))
     assert _rlgc_decomp(line.s, line.f, 50.0)["Gp"][k] < 0
     assert tres.value_drift["R_sh"] < 1e-3
-    assert any(m.startswith("The data's G' at") and m.endswith("so R_sh uses its magnitude")
+    assert any(m.startswith("the data's G' at") and m.endswith("so R_sh is built from |G'|")
                for m in tres.messages), tres.messages
     # R' below zero at 300 GHz read 200 %, and Z_c, which the lossless sqrt(L'/C') stood
     # for, 28.5 % at 875 MHz.  Every term of the line now reads ~0 % at f_ext.
@@ -224,7 +224,36 @@ def test_value_tolerance_at_fext():
         r = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
                                           f_extract=fx), line)
         assert all(v < 1e-3 for v in r.value_drift.values()), (fx, r.value_drift)
-    assert any("R' at 300 GHz is below zero" in m and "R_s uses" in m for m in r.messages)
+    assert any("R' at 300 GHz is below zero" in m and m.endswith("so R_s is built from |R'|")
+               for m in r.messages)
+    # a negative L' means the model's reactance has the wrong sign: a capacitor fed to the
+    # line model misses its data by |dS| 0.7 at 10 GHz, and L_s says so with 200 %
+    mom = _example("mom_cap_74fF_02_ihp-sg13cmos5l.s2p")
+    cap = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                        f_extract=10e9), mom)
+    assert abs(cap.value_drift["L_s"] - 200.0) < 5.0
+    assert any("L' at" in m and "L_s is built from |L'|" in m for m in cap.messages)
+
+
+def test_the_line_note_names_the_terms_the_data_puts_below_zero():
+    """A line with gain (G' < 0, R' > 0): arccosh(A) and sqrt(B/C) at one sample picked the
+    other branch and named R', L' and C' instead of G'.  The note reads the signs off the
+    same unwrapped decomposition as the plots."""
+    import skrf
+    f = np.linspace(1e9, 20e9, 39)
+    w = 2 * np.pi * f
+    z = 1e-3 + 1j * w * 60e-12                      # R' and L' of the whole line
+    y = -1e-5 + 1j * w * 25e-15                     # G' below zero, C'
+    zc = np.sqrt(z / y)
+    gl = z / zc
+    abcd = np.array([[np.cosh(gl), zc * np.sinh(gl)], [np.sinh(gl) / zc, np.cosh(gl)]])
+    s = skrf.network.a2s(np.moveaxis(abcd, -1, 0), z0=50.0)
+    net = skrf.Network(frequency=skrf.Frequency.from_f(f, unit="Hz"), s=s, z0=50.0)
+    res = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                        f_extract=10e9), net)
+    notes = [m for m in res.messages if m.startswith("the data's")]
+    assert len(notes) == 1 and notes[0].startswith("the data's G' at"), notes
+    assert notes[0].endswith("so R_sh is built from |G'|")
 
 
 def test_the_line_shunt_r_follows_the_resistor_limit():

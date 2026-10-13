@@ -20,8 +20,8 @@ class Structure(ABC):
     display_name = ""
     n_ports = 2          # required port count
     # True for a model fitted over the whole band instead of read off at f_ext.  Its
-    # extract() also takes `basic` and `progress` keywords.  The GUI hides f_ext for it
-    # and shows 'Basic model' instead.
+    # extract() also takes `progress` and inductor_wideband.wideband_options() as
+    # keywords.  The GUI hides f_ext for it and shows 'Basic model' instead.
     wideband = False
 
     @abstractmethod
