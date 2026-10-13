@@ -211,7 +211,7 @@ def test_the_island_leak_reaches_only_the_floating_mode():
         assert abs(_r_dc(s) / want - 1.0) < 1e-5
 
 
-def test_a_bad_setting_in_a_loaded_design_skips_the_pin():
+def test_a_bad_setting_skips_the_pin():
     """The skip names the setting at fault, also for a leak that is no number, which used to
     be blamed on the corner.  A design file is checked when it loads, a ConverterState built
     in code is not."""
@@ -283,6 +283,8 @@ def test_a_design_file_holds_its_pin_values_to_numbers():
         for bad in ("true", "false", '"fast"', "[1]", "{}"):
             with pytest.raises(ValueError, match=f"{field} must be a number"):
                 ConverterState.from_json(f'{{"{field}": {bad}}}')
+    with pytest.raises(ValueError, match="got true$"):        # as written in the file
+        ConverterState.from_json('{"dc_pin_fc": true}')
     st = ConverterState.from_json('{"dc_pin_fc": 0, "dc_island_leak": 1e-6}')
     assert (st.dc_pin_fc, st.dc_island_leak) == (0, 1e-6)
 

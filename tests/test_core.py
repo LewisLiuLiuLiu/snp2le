@@ -941,6 +941,11 @@ def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
     assert "--structure, --tolerances ignored in universal mode" in got.err
     assert "tolerances" not in got.out
     assert cli.build_parser().parse_args(["convert", "x.s2p"]).structure is None
+    # the default stays out of args, so a caller can run one Namespace twice
+    ns = cli.build_parser().parse_args(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o",
+                                        out, "--quiet"])
+    for _ in range(2):
+        assert cli.cmd_convert(ns) == 0 and "--structure" not in capsys.readouterr().err
     # an extracted structure still prints its table, and structure mode still means
     # inductor-pi without --structure
     assert cli.main(["convert", _example_path("ind_500pH_ihp-sg13cmos5l.s2p"), "--mode",

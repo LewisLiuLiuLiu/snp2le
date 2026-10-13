@@ -216,8 +216,9 @@ conversion setting and the path of the loaded file as JSON, and load it back, wh
 reloads that file. A design written by hand or by a script can carry the CLI's DC pin
 corner and island leak, which the window has no control for and keeps until
 <b>Reset</b>. Whenever the DC pin acts, its note in the message line names those that
-differ from the defaults. In the file, null means the default, and a value that is no
-number refuses the design.
+differ from the defaults. In the file, null means the default, a value that is no number
+(true, a string) refuses the design, and a number out of range, NaN included, skips the
+pin with a note.
 A design that names no file, or one that cannot be read, is applied to the file already
 loaded, and a dialog names a file that is missing.</li>
 <li><b>Result</b>: fit/extraction quality. RMS error against the data, passivity,

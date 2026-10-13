@@ -24,7 +24,7 @@ def _as_bool(name, value):
         return bool(value)
     if isinstance(value, str) and value.strip().lower() in _TRUE | _FALSE:
         return value.strip().lower() in _TRUE
-    raise ValueError(f"{name} must be true or false, got {value!r}")
+    raise ValueError(f"{name} must be true or false, got {json.dumps(value)}")
 
 
 @dataclass
@@ -86,7 +86,7 @@ class ConverterState:
                 if v is None:
                     continue
                 if isinstance(v, bool) or not isinstance(v, (int, float)):
-                    raise ValueError(f"{k} must be a number, got {v!r}")
+                    raise ValueError(f"{k} must be a number, got {json.dumps(v)}")
             values[k] = v
         return cls(**values)
 
