@@ -384,7 +384,7 @@ From a source checkout without installing, use `python -m snp2le -b ...` in plac
 | `--dc-island-leak S` | universal | conductance to ground for each DC mode without a DC path, which can help harmonic balance converge (default 0) |
 | `--fext FREQ` | structure | extraction frequency, e.g. `7GHz` (default 10 GHz). The wideband inductors have none |
 | `--fmin FREQ` | both | lowest frequency used for the fit (default: the file's first point) |
-| `--fmax FREQ` | both | highest frequency used for the fit (default: the file's last point) |
+| `--fmax FREQ` | both | highest frequency used for the fit, above 0 Hz (default: the file's last point) |
 | `--stages N` | structure | RLGC ladder cells (transmission line), 1 to 10 (default 2) |
 | `--iso-r` / `--no-iso-r` | structure | in-phase Wilkinson isolation R or branch-line arm loss (default on) |
 | `--basic` | structure | fixed basic topology for the wideband inductors: 1 coil segment, 1 skin section, no substrate coupling |

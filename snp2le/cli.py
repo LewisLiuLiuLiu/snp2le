@@ -177,10 +177,18 @@ def _order(text):
 
 
 def _band_edge(text):
-    """argparse type for --fmin and --fmax (a frequency, 0 Hz or more)."""
+    """argparse type for --fmin (a frequency, 0 Hz or more)."""
     v = _freq(text)
     if not v >= 0:
         raise argparse.ArgumentTypeError(f"a fit range edge must be 0 Hz or more (got {text})")
+    return v
+
+
+def _band_top(text):
+    """argparse type for --fmax (above 0 Hz, since the fit treats 0 as an open edge)."""
+    v = _freq(text)
+    if not v > 0:
+        raise argparse.ArgumentTypeError(f"--fmax must be above 0 Hz (got {text})")
     return v
 
 
@@ -514,6 +522,12 @@ def cmd_convert(args):
     if args.output and len(paths) > 1:
         print("[WARN] -o is ignored with multiple inputs, each output is named after its "
               "source", file=sys.stderr)
+    elif args.output and (os.path.isdir(args.output)
+                          or args.output.endswith(("/", os.sep))):
+        # with --format both the stem would be the folder's name, or empty after a separator
+        print(f"[FAIL] -o {args.output}: that is a folder, -o takes a file name",
+              file=sys.stderr)
+        return 1
 
     # the ceiling is what the enforcement aims at, so it means nothing without it
     if args.passivity_ceiling is not None and not args.passive:
@@ -558,7 +572,7 @@ def cmd_convert(args):
             print(f"[WARN] {', '.join(unused)} ignored in universal mode, "
                   f"{'it applies' if len(unused) == 1 else 'these apply'} to structure "
                   f"models", file=sys.stderr)
-    elif struct is not None and not struct.wideband:
+    elif struct is not None:
         unused = [name for name, on in (
             ("--stages", args.stages is not None and args.structure != "tline-rlgc"),
             ("--no-iso-r", not args.iso_r and args.structure not in ("wilkinson-inphase",
@@ -583,6 +597,8 @@ def cmd_convert(args):
     rc = 1 if missing else 0
     last_res = None
     written = set()                     # absolute paths this run wrote
+    # warn about a renamed .SUBCKT only for a name given with -o, not one taken from the source
+    named = bool(args.output) and len(paths) == 1
     for src in paths:
         outs = [_out_path(src, args.output, d, len(paths), len(formats)) for d in formats]
         try:
@@ -634,7 +650,7 @@ def cmd_convert(args):
                 # does the same.  The default 's_equivalent' would not match the testbench.
                 stem = os.path.splitext(os.path.basename(out))[0]
                 res.ir.name = netlist.safe_subckt_name(stem)
-                if res.ir.name != stem:
+                if res.ir.name != stem and named:
                     print(f"[WARN] {out}: the subcircuit is named {res.ir.name}, since "
                           f"'{stem}' is not a valid name in both Ngspice and VACASK. Name "
                           f"the file {res.ir.name}{os.path.splitext(out)[1]} to keep the "
@@ -744,7 +760,8 @@ def build_parser():
     # mode and model
     c.add_argument("--mode", choices=["universal", "structure"], default="universal")
     c.add_argument("--structure", default="inductor-pi",
-                   help="structure key when --mode structure (see list-structures)")
+                   help="structure key when --mode structure (see list-structures, default "
+                        "inductor-pi)")
     # universal-mode options
     c.add_argument("--order", type=_order, default=6,
                    help="max model order, 2 or more (universal, default 6)")
@@ -789,11 +806,12 @@ def build_parser():
     c.add_argument("--fmin", type=_band_edge, default=None, metavar="FREQ",
                    help="lowest frequency used for the fit, e.g. 110GHz "
                         "(default: the file's first point)")
-    c.add_argument("--fmax", type=_band_edge, default=None, metavar="FREQ",
+    c.add_argument("--fmax", type=_band_top, default=None, metavar="FREQ",
                    help="highest frequency used for the fit, e.g. 170GHz "
                         "(default: the file's last point)")
     c.add_argument("--iso-r", dest="iso_r", action="store_true", default=True,
-                   help="include the Wilkinson isolation R or branch-line arm loss")
+                   help="include the in-phase Wilkinson's isolation R or the branch-line "
+                        "coupler's arm loss (default on)")
     c.add_argument("--no-iso-r", dest="iso_r", action="store_false")
     # wideband inductor fit (inductor-wideband, inductor-ct)
     seg_lo, seg_hi = inductor_fit.SEGMENT_RANGE
@@ -821,11 +839,14 @@ def build_parser():
     c.add_argument("--ct-port", type=int, choices=(1, 2, 3), default=None,
                    help="center tap port of inductor-ct (default: detected from the data)")
     # output
-    c.add_argument("--format", choices=["ngspice", "vacask", "both"], default="ngspice")
+    c.add_argument("--format", choices=["ngspice", "vacask", "both"], default="ngspice",
+                   help="output dialect(s), default ngspice. VACASK writes .inc")
     c.add_argument("-o", "--output", default=None, help="output path (single input)")
     c.add_argument("--values", action="store_true", help="print the extracted element values")
     c.add_argument("--tolerances", action="store_true", help="print per-element tolerances")
-    c.add_argument("--quiet", action="store_true", help="suppress the per-file status line")
+    c.add_argument("--quiet", action="store_true",
+                   help="suppress the per-file status and note: lines and the progress bar. "
+                        "[FAIL] and [WARN] lines stay")
     c.add_argument("--progress", action="store_true", default=None,
                    help="show a progress bar while converting (default: only on a terminal)")
     c.add_argument("--no-progress", dest="progress", action="store_false",

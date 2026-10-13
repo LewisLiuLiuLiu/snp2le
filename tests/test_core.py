@@ -916,11 +916,13 @@ def test_cli_refuses_numbers_out_of_range():
     from snp2le import cli
     p = cli.build_parser()
     for bad in (["--order", "1"], ["--order", "x"], ["--fmin", "-5GHz"], ["--fmax", "-1"],
-                ["--timeout", "0"], ["--timeout", "-1"]):
+                ["--fmax", "0"], ["--timeout", "0"], ["--timeout", "-1"]):
         with pytest.raises(SystemExit):
             p.parse_args(["convert", "x.s2p", *bad])
     a = p.parse_args(["convert", "x.s2p"])
     assert (a.order, a.stages, a.timeout) == (6, None, 180.0)
+    # 0 Hz is an open lower edge, while a top edge of 0 Hz would fit the whole band unasked
+    assert p.parse_args(["convert", "x.s2p", "--fmin", "0"]).fmin == 0.0
 
 
 def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
@@ -938,9 +940,14 @@ def test_cli_warns_about_options_that_do_nothing(tmp_path, capsys):
                      "--quiet"]) == 0
     assert ("--basic ignored, it applies to the wideband inductor structures"
             in capsys.readouterr().err)
+    assert cli.main(["convert", _example_path("ind_500pH_ihp-sg13cmos5l.s2p"), "--mode",
+                     "structure", "--structure", "inductor-wideband", "--basic", "--stages",
+                     "3", "--no-iso-r", "-o", out, "--quiet"]) == 0
+    assert ("--stages, --no-iso-r ignored, inductor-wideband has no such option"
+            in capsys.readouterr().err)
 
 
-def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys):
+def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys, monkeypatch):
     from snp2le import cli
     out = tmp_path / "my-model.spice"
     assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(out),
@@ -949,6 +956,11 @@ def test_cli_says_when_it_renames_the_subcircuit(tmp_path, capsys):
     assert "the subcircuit is named my_model" in capsys.readouterr().err
     assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o",
                      str(tmp_path / "plain.spice"), "--quiet"]) == 0
+    assert "subcircuit is named" not in capsys.readouterr().err
+    # without -o the name follows the source file, which the user did not pick
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "--quiet"]) == 0
+    assert ".SUBCKT bpf_ihp_sg13g2 " in (tmp_path / "bpf_ihp-sg13g2.spice").read_text()
     assert "subcircuit is named" not in capsys.readouterr().err
 
 
@@ -962,6 +974,17 @@ def test_cli_input_and_output_mistakes_get_one_clear_message(tmp_path, capsys):
     assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", str(folder),
                      "--quiet"]) == 1
     assert "that is a folder, -o takes a file name" in capsys.readouterr().err
+    # also with both dialects, which wrote outdir.spice beside the folder or a hidden .spice
+    # after a trailing separator, and a folder named my-dir drew the rename warning first
+    dashed = tmp_path / "my-dir"
+    dashed.mkdir()
+    for out in (str(folder), str(dashed), str(tmp_path / "new") + os.sep):
+        assert cli.main(["convert", _example_path("bpf_ihp-sg13g2.s2p"), "-o", out,
+                         "--format", "both", "--quiet"]) == 1
+        err = capsys.readouterr().err
+        assert err.count("that is a folder, -o takes a file name") == 1, err
+        assert "subcircuit is named" not in err
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == []
 
 
 def test_the_netlist_names_the_snp2le_version():
