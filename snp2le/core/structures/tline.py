@@ -16,17 +16,38 @@ import numpy as np
 
 from .base import Structure
 from ..ir import CircuitIR, Element
-from ..units import comp_label, port_label
+from ..units import comp_label, port_label, format_eng
+from ..netlist import _LIMITS
 
 N_SEGMENTS = 2          # default number of L-cells in the ladder
+# the data's whole-line terms, the element each one sets, and its unit for a note
+_TERMS = (("R'", "R_s", "ohm"), ("L'", "L_s", "H"), ("G'", "R_sh", "S"), ("C'", "C_sh", "F"))
 
 
 def _shunt_r(g):
     """R_sh from a shunt conductance per cell, the rule extract() and value_drift() share:
-    |G'|, since the data can put G' a hair below zero, and 1e12 ohm where it is negligible."""
+    |G'|, since the data can put G' a hair below zero, and the netlist's resistor limit
+    where 1/|G'| would pass it, so the tolerance compares against the clamped value."""
     g = np.abs(np.asarray(g, dtype=float))
-    with np.errstate(divide="ignore"):
-        return np.where(g > 1e-15, 1.0 / g, 1e12)
+    r_max = _LIMITS["R"][1]
+    with np.errstate(divide="ignore", over="ignore"):
+        return np.where(g > 1.0 / r_max, 1.0 / g, r_max)
+
+
+def _sign_note(terms, f):
+    """A note naming the data's R', L', G' or C' at `f` that are below zero, whose magnitude
+    the model takes, or None."""
+    neg = [(name, elem, unit, v) for (name, elem, unit), v in zip(_TERMS, terms) if v < 0]
+    if not neg:
+        return None
+    names = [n for n, _, _, _ in neg]
+    elems = [e for _, e, _, _ in neg]
+    if len(neg) == 1:
+        return (f"The data's {names[0]} at {format_eng(f, 'Hz')} is below zero "
+                f"({neg[0][3]:.2g} {neg[0][2]}), so {elems[0]} uses its magnitude")
+    return (f"The data's {', '.join(names[:-1])} and {names[-1]} at {format_eng(f, 'Hz')} are "
+            f"below zero ({', '.join(f'{n} {v:.2g} {u}' for n, _, u, v in neg)}), so "
+            f"{', '.join(elems[:-1])} and {elems[-1]} use their magnitudes")
 
 
 def _rlgc_decomp(s, f, z0):
@@ -47,7 +68,7 @@ def _rlgc_decomp(s, f, z0):
         Zser = gl * Zc                                   # R'l + j w L'l
         Ysh = gl / Zc                                    # G'l + j w C'l
     return {"Rp": Zser.real, "Lp": Zser.imag / w,
-            "Gp": Ysh.real, "Cp": Ysh.imag / w}
+            "Gp": Ysh.real, "Cp": Ysh.imag / w, "Zc": Zc}
 
 
 class TransmissionLine(Structure):
@@ -92,6 +113,9 @@ class TransmissionLine(Structure):
 
         metrics = {"segments": n, "f_extract": float(f[k]),
                    "Zc": float(abs(Zc))}
+        note = _sign_note((Ztot.real, Ztot.imag / wk, Ytot.real, Ytot.imag / wk), f[k])
+        if note:                                            # the netlist takes magnitudes
+            metrics["messages"] = [note]
         rows = [("N_seg", float(n), ""),
                 ("Z_c", float(abs(Zc)), "Ω"),
                 ("R_s", R_seg, "Ω"), ("L_s", L_seg, "H"),
@@ -106,12 +130,11 @@ class TransmissionLine(Structure):
         D = _rlgc_decomp(net.s, net.f, z0)
         vals = {lab: v for lab, v, _ in value_rows}
         n = max(1, int(round(vals.get("N_seg", 1))))     # per-cell = whole-line / N
-        # clipping G' at 1e-30 instead read a G' below zero as 1e30 ohm, a tolerance of 1e24 %
-        Rsh = _shunt_r(D["Gp"] / n)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            Zc = np.sqrt(D["Lp"] / D["Cp"])
-        curves = {"Z_c": Zc, "R_s": D["Rp"] / n, "L_s": D["Lp"] / n,
-                  "C_sh": D["Cp"] / n, "R_sh": Rsh}
+        # magnitudes as in extract(), which names a term the data puts below zero in a note
+        # (signed curves read 200 % there), and the lossy Z_c the value is
+        curves = {"Z_c": np.abs(D["Zc"]), "R_s": np.abs(D["Rp"]) / n,
+                  "L_s": np.abs(D["Lp"]) / n, "C_sh": np.abs(D["Cp"]) / n,
+                  "R_sh": _shunt_r(D["Gp"] / n)}
         return {lab: self.fext_tolerance_pct(c, vals[lab], net.f, f_extract)
                 for lab, c in curves.items() if lab in vals}
 

@@ -216,6 +216,25 @@ def test_value_tolerance_at_fext():
     k = int(np.argmin(np.abs(line.f - 10e9)))
     assert _rlgc_decomp(line.s, line.f, 50.0)["Gp"][k] < 0
     assert tres.value_drift["R_sh"] < 1e-3
+    assert any(m.startswith("The data's G' at") and m.endswith("so R_sh uses its magnitude")
+               for m in tres.messages), tres.messages
+    # R' below zero at 300 GHz read 200 %, and Z_c, which the lossless sqrt(L'/C') stood
+    # for, 28.5 % at 875 MHz.  Every term of the line now reads ~0 % at f_ext.
+    for fx in (0.875e9, 300e9):
+        r = engine.convert(ConverterState(mode="structure", structure_key="tline-rlgc",
+                                          f_extract=fx), line)
+        assert all(v < 1e-3 for v in r.value_drift.values()), (fx, r.value_drift)
+    assert any("R' at 300 GHz is below zero" in m and "R_s uses" in m for m in r.messages)
+
+
+def test_the_line_shunt_r_follows_the_resistor_limit():
+    """The netlist clamps a resistor at 1e12 ohm, so R_sh does too, from 1e-12 S down, and
+    an absurdly small conductance raises no overflow."""
+    from snp2le.core.structures.tline import _shunt_r
+    assert _shunt_r(1e-13) == 1e12 and _shunt_r(-1e-13) == 1e12 and _shunt_r(0.0) == 1e12
+    assert _shunt_r(2e-12) == 5e11 and _shunt_r(-0.5) == 2.0
+    with np.errstate(all="raise"):
+        assert _shunt_r(5e-324) == 1e12
 
 
 def test_mna_coupled_inductors_match_mutual_impedance():
