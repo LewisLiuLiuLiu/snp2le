@@ -615,7 +615,7 @@ class PlotView(QtWidgets.QWidget):
     def import_sim(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Import simulation", self._sim_dir(),
-            "Ngspice output (*.txt);;All files (*)")
+            "Simulation result table (*.txt);;All files (*)")
         if path:
             self.import_sim_file(path)
 

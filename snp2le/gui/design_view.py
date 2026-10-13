@@ -11,12 +11,6 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from snp2le.core.units import format_eng
-
-
-def _value_text(val, unit):
-    """An element value as the CLI prints it: SI prefix with a unit, a plain number for a
-    dimensionless one (k 0.434, not 434 m)."""
-    return format_eng(val, unit) if unit else f"{val:.4g}"
 from .style import JKU_GRAY, STATUS_GREEN, STATUS_AMBER, STATUS_RED
 from .widgets import (OutputField, section_title, MathLabel, passivity_text,
                       sigma_text, noise_text, with_symbols)
@@ -33,6 +27,12 @@ _ROW_GAP = 3
 # A longer values table (the wideband inductors, up to 24 elements) goes in two columns, so
 # the panel keeps its height.  Every other structure has at most 9 values and one column.
 _ONE_COLUMN_ROWS = 12
+
+
+def _value_text(val, unit):
+    """An element value as the CLI prints it: SI prefix with a unit, a plain number for a
+    dimensionless one (k 0.434, not 434 m)."""
+    return format_eng(val, unit) if unit else f"{val:.4g}"
 
 
 def _panel(title):

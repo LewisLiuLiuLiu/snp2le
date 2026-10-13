@@ -215,7 +215,8 @@ running.</li>
 conversion setting and the path of the loaded file as JSON, and load it back, which also
 reloads that file. A design written by hand or by a script can carry the CLI's DC pin
 corner and island leak, which the window has no control for and keeps until
-<b>Reset</b>. The message line names them while they differ from the defaults.
+<b>Reset</b>. Whenever the DC pin acts, its note in the message line names those that
+differ from the defaults.
 A design that names no file, or one that cannot be read, is applied to the file already
 loaded, and a dialog names a file that is missing.</li>
 <li><b>Result</b>: fit/extraction quality. RMS error against the data, passivity,
@@ -354,10 +355,11 @@ as they do in Ngspice. No action is needed, and structure-specific models are un
 <p>While a run is in progress the status reads <i>running...</i> (for as long as the
 simulation takes, and for a VACASK run until its result appears) and then, for Ngspice,
 <i>importing...</i>. The <b>Run Simulation</b> button becomes a <b>Stop</b> button you can
-press to cancel. A run is not stopped for being slow. Without <b>Show output</b> it is
-stopped when it has used no CPU for 60&nbsp;s and looks hung, and every run has a 1&nbsp;h
-backstop (30&nbsp;min on a system without <tt>/proc</tt>, such as Windows, where idle
-detection is not available).</p>
+press to cancel. A run is not stopped for being slow. An Ngspice run without <b>Show
+output</b> is stopped when it has used no CPU for 60&nbsp;s and looks hung, or after
+30&nbsp;min on a system without <tt>/proc</tt>, such as Windows, where idle detection is
+not available. A VACASK run, which Xschem starts detached, ends as failed 1.5&nbsp;s after
+VACASK exits without a result. Every run has a 1&nbsp;h backstop.</p>
 
 <p style="color:#7d828c"><i>Universal mode is built on scikit-rf vector fitting. The VACASK
 passive, controlled-source (vccs, cccs) and ground (<tt>GND</tt>) handling are confirmed
